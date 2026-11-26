@@ -71,6 +71,18 @@ export default function CameraDetailPage() {  const { id } = useParams<{ id: str
   const [showEdit, setShowEdit] = useState(false)
   // Какой поток показываем в плеере: основной или дополнительный.
   const [activeStream, setActiveStream] = useState<'main' | 'sub'>('main')
+
+  // Если выбранного потока у камеры нет (бывает только доп. или только
+  // основной), переключаемся на тот, что есть. Иначе плеер открылся бы
+  // на пустом адресе и остался чёрным до ручного выбора.
+  useEffect(() => {
+    if (!streamInfo) return
+    if (activeStream === 'main' && !streamInfo.mse_url && streamInfo.sub_mse_url) {
+      setActiveStream('sub')
+    } else if (activeStream === 'sub' && !streamInfo.sub_mse_url && streamInfo.mse_url) {
+      setActiveStream('main')
+    }
+  }, [streamInfo, activeStream])
   // Транспорт живого потока: от него зависит задержка показа рамок детекций.
   const [liveTransport, setLiveTransport] = useState<'webrtc' | 'mse' | null>(null)
   // Какая команда выполняется сейчас: блокируем все кнопки, пока идёт одна.
@@ -443,7 +455,9 @@ export default function CameraDetailPage() {  const { id } = useParams<{ id: str
                 webrtcUrl={
                   activeStream === 'main'
                     ? (streamInfo?.webrtc_url || '')
-                    : (streamInfo?.sub_webrtc_url || '')
+                    // Если доп. потока у камеры нет, его URL пуст — плеер
+                    // молча остался бы на MSE. Берём основной.
+                    : (streamInfo?.sub_webrtc_url || streamInfo?.webrtc_url || '')
                 }
                 muted={true}
                 volume={0.7}
