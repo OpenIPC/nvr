@@ -9,11 +9,11 @@
  * различается только интерфейс.
  */
 
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StatusBar, StyleSheet, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, BackHandler, StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AppProvider, useApp } from './src/state/AppContext';
-import { SipProvider } from './src/state/SipContext';
+import { SipProvider, useSip } from './src/state/SipContext';
 import ServersScreen from './src/screens/ServersScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import BlockedScreen from './src/screens/BlockedScreen';
@@ -51,6 +51,8 @@ type Route =
 
 function Router() {
   const { ready, current, token, blockedNotice, signOut } = useApp();
+  const { snapshot } = useSip();
+  const callOnScreen = Boolean(snapshot.call);
   const [route, setRoute] = useState<Route>({ name: 'cameras' });
 
   /**
@@ -73,6 +75,38 @@ function Router() {
       }),
     [],
   );
+  /**
+   * Кнопка «назад» системы Android.
+   *
+   * Навигация здесь своя, а не из библиотеки, поэтому система о ней ничего не
+   * знает: без обработчика «назад» на любом экране закрывала бы приложение.
+   * С любого экрана возвращаем к списку камер; из списка серверов, открытого
+   * с экрана входа (токена ещё нет), — обратно ко входу. Из списка камер,
+   * с экрана входа и при блокировке возвращаем false: там приложение
+   * закрывается, как и положено.
+   */
+  // Состояние читаем из ref, а подписку делаем один раз: система вызывает
+  // обработчики с последнего зарегистрированного. Подписка роутера, заново
+  // созданная при каждой смене экрана или вызова, оказывалась бы последней и
+  // перехватывала бы «назад» раньше обработчиков самих экранов (плеер архива,
+  // сканер QR).
+  const backState = useRef({ current, token, blockedNotice, route, callOnScreen });
+  backState.current = { current, token, blockedNotice, route, callOnScreen };
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      const state = backState.current;
+      if (!state.current || state.blockedNotice) return false;
+      // Экран вызова лежит поверх приложения: «назад» не должна менять экран под ним.
+      if (state.callOnScreen) return true;
+      if (state.route.name === 'servers' || (state.token && state.route.name !== 'cameras')) {
+        setRoute({ name: 'cameras' });
+        return true;
+      }
+      return false;
+    });
+    return () => subscription.remove();
+  }, []);
+
   // Пока состояние не прочитано с диска, показывать нечего: иначе экран
   // входа мигнёт перед тем, как приложение вспомнит сохранённый токен.
   if (!ready) {
