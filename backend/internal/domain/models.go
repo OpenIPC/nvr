@@ -1112,7 +1112,14 @@ type DiscoveredCamera struct {
 	// интерфейс (см. webui/src/pages/ScannerPage.tsx).
 	// Это важно для разбора спорных случаев: оператор видит, на чём
 	// основан вывод, а не верит вслепую.
-	HowFound   string `json:"how_found,omitempty"`
+	HowFound string `json:"how_found,omitempty"`
+	// Source — как устройство попало в список: scan, wsd, mdns, peers.
+	//
+	// Нужен потому, что пассивные находки (WS-Discovery, mDNS, реестр
+	// соседей) появляются без перебора и без учётных данных, и оператору
+	// полезно понимать, откуда устройство известно и чему верить. Когда
+	// источников несколько, перечисляются через запятую.
+	Source     string `json:"source,omitempty"`
 	MainStream string `json:"main_stream"`
 	SubStream  string `json:"sub_stream"`
 

@@ -31,6 +31,10 @@ type SettingsStore interface {
 	// UpdatePushSettings пишет настройки канала push отдельным ключом:
 	// иначе сохранение настроек Telegram затирало бы их.
 	UpdatePushSettings(ctx context.Context, cfg domain.PushConfig) error
+	// UpdateMaxSettings пишет настройки MAX отдельным ключом по той же
+	// причине: пока MAX хранился вместе с Telegram, сохранение одного
+	// канала стирало другой, и настройки MAX пропадали из интерфейса.
+	UpdateMaxSettings(ctx context.Context, cfg domain.MaxConfig) error
 }
 
 // NotificationLogStore — доступ к журналу отправок.
@@ -208,17 +212,13 @@ func (h *NotificationHandler) UpdateMax(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	settings, err := h.settings.UpdateServerSettings(r.Context(), domain.UpdateServerSettingsRequest{
-		Notifications: &domain.NotificationSettings{
-			Max:      cfg,
-			Telegram: current.Notifications.Telegram,
-		},
-	})
-	if err != nil {
+	// Пишем отдельным ключом: если сохранять MAX вместе с Telegram,
+	// настройки одного канала затирают другой (см. UpdateMaxSettings).
+	if err := h.settings.UpdateMaxSettings(r.Context(), cfg); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, maskMax(settings.Notifications.Max))
+	writeJSON(w, http.StatusOK, maskMax(cfg))
 }
 
 // GetPush отдаёт настройки уведомлений в мобильное приложение.

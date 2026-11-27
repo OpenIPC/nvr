@@ -218,12 +218,21 @@ func (m *Max) uploadNamed(ctx context.Context, token, kind, filename string, dat
 	if uploadResp.URL == "" {
 		return "", errors.New("MAX не вернул адрес для загрузки файла")
 	}
+	// Адрес загрузки обязан быть https: по http файл с камеры ушёл бы
+	// открытым текстом, а MAX такой адрес и не выдаёт. Проверка защищает
+	// от подмены ответа посредником в сети.
+	if !strings.HasPrefix(strings.ToLower(uploadResp.URL), "https://") {
+		return "", fmt.Errorf("MAX выдал адрес загрузки не по https: %.40s", uploadResp.URL)
+	}
 
-	// Шаг 2: загрузка файла. Используем multipart: он проще возобновляемой
-	// загрузки, а наши клипы по 20-40 МБ загружаются с первого раза.
+	// Шаг 2: загрузка файла. Поле формы должно называться «file»: MAX
+	// (как и TamTam, от которого он унаследован) ищет файл именно под
+	// этим именем, а поле с другим именем молча игнорирует — в ответе
+	// не будет токена вложения, и фото с видео уходили как текст или
+	// вовсе не отправлялись.
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
-	part, err := w.CreateFormFile("data", filename)
+	part, err := w.CreateFormFile("file", filename)
 	if err != nil {
 		return "", err
 	}
@@ -238,9 +247,12 @@ func (m *Max) uploadNamed(ctx context.Context, token, kind, filename string, dat
 	if err != nil {
 		return "", err
 	}
-	// Заголовок авторизации нужен и на адресе загрузки: без него MAX
-	// отвечает verify.token, и файл не принимается.
-	m.authorize(upReq, token)
+	// Заголовок авторизации на адрес загрузки НЕ ставим.
+	//
+	// Этот адрес — одноразовая ссылка на хранилище, а не метод Bot API:
+	// лишний Authorization в запросе к хранилищу приводит к отказу
+	// «verify.token», и файл не принимается. Токен нужен только на
+	// /uploads и /messages.
 	upReq.Header.Set("Content-Type", w.FormDataContentType())
 
 	upResp, err := m.http.Do(upReq)

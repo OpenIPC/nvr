@@ -2339,6 +2339,14 @@ export default {
     howCgi: 'over the CGI API',
     howHttpHeaders: 'by the HTTP headers',
 
+    // How the device got into the list. Passive finds come without scanning
+    // and without passwords, so the operator should know what to trust.
+    sourceScan: 'found by subnet sweep',
+    sourceWsd: 'answered WS-Discovery',
+    sourceMdns: 'announced in mDNS',
+    sourcePeers: 'listed by an OpenIPC peer',
+    sourceLabel: 'Discovered:',
+
     // Door phones and handsets: the scanner finds them together with cameras,
     // but they are added as SIP accounts, not as cameras.
     intercomBadge: 'Door phone',

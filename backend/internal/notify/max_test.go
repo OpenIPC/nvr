@@ -15,6 +15,9 @@ import (
 )
 
 // maxStub подменяет platform-api2.max.ru и записывает полученные запросы.
+//
+// Сервер TLS: адрес загрузки в ответе /uploads должен быть https, иначе
+// клиент справедливо откажется по нему загружать файл.
 func maxStub(t *testing.T, requests *[]string, headers *[]string) *httptest.Server {
 	t.Helper()
 
@@ -22,7 +25,7 @@ func maxStub(t *testing.T, requests *[]string, headers *[]string) *httptest.Serv
 	// сервера, который становится известен только после его создания.
 	var srv *httptest.Server
 
-	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		*requests = append(*requests, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
 		*headers = append(*headers, r.Header.Get("Authorization"))
 
@@ -41,6 +44,17 @@ func maxStub(t *testing.T, requests *[]string, headers *[]string) *httptest.Serv
 			})
 
 		case strings.HasSuffix(r.URL.Path, "/upload-target"):
+			// Проверяем имя поля формы: MAX ищет файл только в поле file,
+			// остальное молча игнорирует и токена вложения не возвращает.
+			//
+			// Запись добавляем вместе с пустым заголовком, чтобы номера
+			// элементов requests и headers оставались согласованы.
+			if err := r.ParseMultipartForm(1 << 20); err == nil {
+				for name := range r.MultipartForm.File {
+					*requests = append(*requests, "FIELD "+name)
+					*headers = append(*headers, "")
+				}
+			}
 			// Ответ загрузки: файл принят, вернулся токен вложения.
 			json.NewEncoder(w).Encode(map[string]any{"token": "uploaded-token-42"})
 
@@ -63,15 +77,27 @@ func maxStub(t *testing.T, requests *[]string, headers *[]string) *httptest.Serv
 	return srv
 }
 
-func TestMaxSendMessage(t *testing.T) {
-	var reqs, auths []string
-	srv := maxStub(t, &reqs, &auths)
+// newMaxForStub собирает клиент, направленный на тестовый сервер.
+//
+// Клиент берём у самого тестового сервера: он доверяет его самоподписанному
+// сертификату, и проверка https в рабочем коде остаётся включённой.
+func newMaxForStub(t *testing.T, srv *httptest.Server) *Max {
+	t.Helper()
 
 	old := maxAPIBase
 	maxAPIBase = srv.URL
 	t.Cleanup(func() { maxAPIBase = old })
 
 	c := NewMax()
+	c.http = srv.Client()
+	return c
+}
+
+func TestMaxSendMessage(t *testing.T) {
+	var reqs, auths []string
+	srv := maxStub(t, &reqs, &auths)
+
+	c := newMaxForStub(t, srv)
 	if err := c.SendMessage(context.Background(), "tok123", "456", "привет"); err != nil {
 		t.Fatalf("отправка не прошла: %v", err)
 	}
@@ -97,11 +123,7 @@ func TestMaxImageIsTwoStepUpload(t *testing.T) {
 	var reqs, auths []string
 	srv := maxStub(t, &reqs, &auths)
 
-	old := maxAPIBase
-	maxAPIBase = srv.URL
-	t.Cleanup(func() { maxAPIBase = old })
-
-	c := NewMax()
+	c := newMaxForStub(t, srv)
 	img := []byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10} // начало JPEG
 	if err := c.SendImage(context.Background(), "tok123", "456", img, "Снимок события"); err != nil {
 		t.Fatalf("отправка снимка не прошла: %v", err)
@@ -144,25 +166,54 @@ func TestMaxImageIsTwoStepUpload(t *testing.T) {
 	}
 }
 
-func TestMaxAuthHeaderOnUpload(t *testing.T) {
+// TestMaxUploadKeepsTokenOffStorageURL проверяет разделение токена и адреса
+// загрузки, а также имя поля формы.
+//
+// Адрес загрузки — одноразовая ссылка на хранилище, а не метод Bot API:
+// лишний Authorization в запросе к нему приводит к отказу verify.token.
+// Файл при этом обязан лежать в поле file — под другим именем MAX его
+// молча игнорирует, и вложение не появляется.
+func TestMaxUploadKeepsTokenOffStorageURL(t *testing.T) {
 	var reqs, auths []string
 	srv := maxStub(t, &reqs, &auths)
 
-	old := maxAPIBase
-	maxAPIBase = srv.URL
-	t.Cleanup(func() { maxAPIBase = old })
-
-	c := NewMax()
+	c := newMaxForStub(t, srv)
 	if err := c.SendFile(context.Background(), "tok123", "456", []byte("data"), "f.pdf", "файл"); err != nil {
 		t.Fatalf("отправка файла не прошла: %v", err)
 	}
 
-	// Заголовок нужен и на адресе загрузки: без него MAX отвечает
-	// verify.token, и файл не принимается.
-	for i, a := range auths {
-		if a != "tok123" {
-			t.Errorf("запрос %d (%s) ушёл без токена в заголовке: %q", i, reqs[i], a)
+	sawUploadTarget := false
+	for i, r := range reqs {
+		if !strings.Contains(r, "/upload-target") {
+			continue
 		}
+		sawUploadTarget = true
+		if auths[i] != "" {
+			t.Errorf("на адрес загрузки ушёл Authorization (%q) — хранилище такой запрос отвергнет", auths[i])
+		}
+	}
+	if !sawUploadTarget {
+		t.Fatal("загрузка по выданному адресу не выполнялась")
+	}
+
+	// Методы API обязаны идти с токеном.
+	for i, r := range reqs {
+		if strings.Contains(r, "/uploads?") || strings.Contains(r, "/messages") {
+			if auths[i] != "tok123" {
+				t.Errorf("запрос %q ушёл без токена в заголовке: %q", r, auths[i])
+			}
+		}
+	}
+
+	// Файл должен быть в поле file.
+	sawFileField := false
+	for _, r := range reqs {
+		if r == "FIELD file" {
+			sawFileField = true
+		}
+	}
+	if !sawFileField {
+		t.Errorf("файл отправлен не в поле file: %v", reqs)
 	}
 }
 
@@ -170,11 +221,7 @@ func TestMaxUserIdPrefix(t *testing.T) {
 	var reqs, _ []string
 	srv := maxStub(t, &reqs, &[]string{})
 
-	old := maxAPIBase
-	maxAPIBase = srv.URL
-	t.Cleanup(func() { maxAPIBase = old })
-
-	c := NewMax()
+	c := newMaxForStub(t, srv)
 	// Префикс «u» переключает на user_id: MAX различает чаты и пользователей.
 	if err := c.SendMessage(context.Background(), "tok", "u789", "привет"); err != nil {
 		t.Fatalf("отправка не прошла: %v", err)

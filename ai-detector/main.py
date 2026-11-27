@@ -33,6 +33,7 @@ from plate_zone import has_plate_zone, zone_box
 from audio_pipeline import AudioPipeline
 from embeddings import crop_with_padding
 from attributes import dominant_color
+from snapshot_verify import keeps_object, to_fraction
 # Классы событий от движков распознавания лежат в detection_config: этот
 # модуль импортируют и детектор, и тесты без загрузки тяжёлых моделей.
 from detection_config import RECOGNITION_CLASSES
@@ -154,6 +155,67 @@ class AIDetector:
             return None
         ok, buf = cv2.imencode(".jpg", img, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
         return buf.tobytes() if ok else None
+
+    def snapshot_has_object(self, jpeg_bytes: bytes, expected: list[dict]) -> bool:
+        """Есть ли на снимке события объект, из-за которого оно записано.
+
+        Снимок приходит из основного потока отдельным запросом и через
+        секунды после кадра детекции — за это время машина успевает уехать,
+        и в событие попадал пустой кадр. Проверяем повторной детекцией по
+        самому снимку: без этого «кадр есть, объекта нет» неотличимо от
+        годного снимка.
+
+        Инференс идёт БЕЗ трекера: обычный `detect` подменил бы состояние
+        трекера камеры размером снимка (другое разрешение), и пересечение
+        линии перестало бы считаться. Проверка — отдельный, разовый вызов.
+
+        True возвращается и при сбое проверки (битый JPEG, ошибка модели):
+        отбросить годный снимок из-за проблем самой проверки хуже, чем
+        оставить его непроверенным.
+        """
+        if not expected:
+            return True
+        try:
+            # .copy() по той же причине, что и в detect: np.frombuffer отдаёт
+            # read-only буфер, а cv2.imdecode в OpenCV 4.11 требует writable.
+            nparr = np.frombuffer(jpeg_bytes, np.uint8).copy()
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        except Exception:
+            return True
+        if img is None:
+            return True
+
+        h, w = img.shape[:2]
+        if h <= 0 or w <= 0:
+            return True
+
+        # Тот же замок, что и у detect: predictor модели общий на все камеры.
+        with self._lock:
+            try:
+                # Порог ниже обычного: на снимке 1920 px, уменьшенном моделью
+                # до 640, объект мельче, чем на кадре субпотока, и с рабочим
+                # порогом мог бы не найтись. Ложное срабатывание здесь дешевле
+                # пропуска: пропуск отбросил бы годный снимок.
+                results = self.model.predict(
+                    img, conf=max(0.1, self.conf * 0.5), iou=self.iou,
+                    device=self.device, verbose=False)
+            except Exception as e:
+                logger.warning(f"проверка снимка события не удалась: {e}")
+                return True
+
+        found = []
+        if results and results[0].boxes:
+            boxes = results[0].boxes
+            for i in range(len(boxes)):
+                cls_id = int(boxes.cls[i].item())
+                name = self.model.names.get(cls_id, f"class_{cls_id}")
+                x1, y1, x2, y2 = boxes.xyxy[i].tolist()
+                found.append({
+                    "object_class": name,
+                    "bbox": {"x": x1 / w, "y": y1 / h,
+                             "w": (x2 - x1) / w, "h": (y2 - y1) / h},
+                })
+        return keeps_object(expected, found)
 
     def _infer(self, img, camera_id):
         """Инференс с трекером, изолированным по камере."""
@@ -504,6 +566,11 @@ async def main():
     snapshot_from_publisher = os.getenv("SNAPSHOT_FROM_PUBLISHER", "1").strip().lower() \
         not in ("0", "false", "no", "off")
     snapshot_timeout = float(os.getenv("SNAPSHOT_TIMEOUT", "6"))
+    # Проверять ли снимок события на наличие объекта. Умолчание — проверять:
+    # без этого в события попадали кадры, где объект уже ушёл. Флаг нужен,
+    # чтобы отключить лишний инференс на слабом процессоре без правки кода.
+    snapshot_verify = os.getenv("SNAPSHOT_VERIFY", "1").strip().lower() \
+        not in ("0", "false", "no", "off")
 
     async def handle_snapshot(msg):
         """Отдаёт ожидающему адресату полученный снимок."""
@@ -865,8 +932,32 @@ async def main():
         need_snapshot = bool(events or face_probes or plate_probes)
         want_snapshot = need_snapshot and send_snapshot and (cfg is None or cfg.save_snapshots)
 
+        def expected_on_snapshot() -> list[dict]:
+            """Рамки объектов события в долях кадра — для проверки снимка.
+
+            Собираются из того же кадра, на котором сработала детекция:
+            события объектов, лица и номера. У лица и номера на снимке
+            ищется родительский класс (человек/машина), это учитывает
+            snapshot_verify.
+            """
+            if frame_size is None:
+                return []
+            items = [(ev.get("object_class"), ev.get("bbox")) for ev in events]
+            items += [("face", getattr(p, "bbox", None)) for p in face_probes]
+            items += [("plate", getattr(p, "bbox", None)) for p in plate_probes]
+            out = []
+            for object_class, bbox in items:
+                box = to_fraction(bbox, frame_size)
+                if object_class and box is not None:
+                    out.append({"object_class": str(object_class), "bbox": box})
+            return out
+
         async def emit(with_snapshot: bool):
             snapshot_b64 = None
+            # Откуда взят снимок: "full" — основной поток, "detection" —
+            # кадр детекции. Пишется в метаданные события, чтобы после
+            # обновления было видно, как часто срабатывает откат.
+            snapshot_source = None
             if with_snapshot:
                 # Сначала просим полный кадр основного потока: кадр детекции
                 # приходит из субпотока, а его 704×576 для снимка события
@@ -874,10 +965,36 @@ async def main():
                 # качества снимка.
                 async with snapshot_jobs:
                     snapshot_b64 = await request_snapshot(camera_id)
-                if snapshot_b64 is None and img is not None:
+                if snapshot_b64:
+                    snapshot_source = "full"
+
+                # Снимок приходит через секунды после кадра детекции, и
+                # объект за это время успевает уйти. Проверяем, что он ещё
+                # на снимке; если нет — берём кадр детекции, где он есть
+                # гарантированно (именно с него сработало событие).
+                if (snapshot_b64 and snapshot_verify and detector is not None
+                        and img is not None):
+                    expected = expected_on_snapshot()
+                    if expected:
+                        try:
+                            raw = base64.b64decode(snapshot_b64)
+                            keep = await asyncio.to_thread(
+                                detector.snapshot_has_object, raw, expected)
+                        except Exception:
+                            # Сбой проверки не повод терять снимок.
+                            keep = True
+                        if not keep:
+                            logger.debug(
+                                f"[{camera_id[:8]}] на снимке события объекта "
+                                f"уже нет — беру кадр детекции")
+                            snapshot_b64 = None
+                            snapshot_source = None
+
+                if snapshot_b64 is None and detector is not None and img is not None:
                     jpeg = detector.encode_jpeg(img)
                     if jpeg:
                         snapshot_b64 = base64.b64encode(jpeg).decode("ascii")
+                        snapshot_source = "detection"
 
             if events:
                 # Векторы кадров для поиска по смыслу. Считаем пакетом:
@@ -915,6 +1032,12 @@ async def main():
                 for ev in events:
                     if snapshot_b64:
                         ev["snapshot_jpeg"] = snapshot_b64
+                    if snapshot_source:
+                        # Источник снимка виден в событии: по нему проверяется
+                        # на живом стенде, что откат на кадр детекции работает.
+                        meta = dict(ev.get("metadata") or {})
+                        meta["snapshot_source"] = snapshot_source
+                        ev["metadata"] = meta
                     if frame_size is not None:
                         # Размер кадра добавляем к уже собранным метаданным,
                         # не заменяя их: там может лежать признак пересечения

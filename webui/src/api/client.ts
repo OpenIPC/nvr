@@ -448,6 +448,9 @@ export interface DiscoveredCamera {
    * какому признаку верить, а не принимает вывод вслепую.
    */
   how_found?: string
+  /** Откуда устройство известно: scan, wsd, mdns, peers (может быть
+   *  несколько через запятую). */
+  source?: string
   main_stream: string
   sub_stream: string
   snapshot?: string

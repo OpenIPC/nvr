@@ -328,10 +328,18 @@ func applySetting(out *domain.ServerSettings, key string, raw []byte) error {
 			return fmt.Errorf("decode snapshots settings: %w", err)
 		}
 	case "notifications":
-		// Разбираем во временную структуру и переносим только каналы:
+		// Разбираем во временную структуру и переносим только Telegram:
 		// в ключе notifications поля System нет (оно живёт отдельным
 		// ключом), и прямая распаковка затирала бы уже прочитанные
 		// системные настройки, если строки пришли в другом порядке.
+		//
+		// Max здесь тоже не переносим без проверки. Раньше MAX писался
+		// в этот же ключ, а потом получил свой (notifications_max).
+		// Порядок строк из базы не гарантирован, и безусловная запись
+		// означала бы: если notifications пришёл последним, он затирал
+		// свежие настройки MAX старыми — снаружи это выглядело как
+		// «настройки MAX сами пропали». Поэтому старый вариант
+		// принимается только тогда, когда отдельного ключа ещё нет.
 		var loaded struct {
 			Telegram domain.TelegramConfig `json:"telegram"`
 			Max      domain.MaxConfig      `json:"max"`
@@ -340,7 +348,9 @@ func applySetting(out *domain.ServerSettings, key string, raw []byte) error {
 			return fmt.Errorf("decode notifications settings: %w", err)
 		}
 		out.Notifications.Telegram = loaded.Telegram
-		out.Notifications.Max = loaded.Max
+		if loaded.Max.BotToken != "" && out.Notifications.Max.BotToken == "" {
+			out.Notifications.Max = loaded.Max
+		}
 	case "notifications_max":
 		// Канал MAX лежит отдельным ключом: у него свои токен и chat_id,
 		// а общие правила отбора событий совпадают с Telegram.
@@ -476,12 +486,31 @@ func (r *DetectionSettingsRepo) SetDetectionRuntime(ctx context.Context, st doma
 	return nil
 }
 
-// UpdateServerSettings сохраняет переданные секции настроек.
+// UpdateMaxSettings сохраняет настройки канала MAX.
+//
+// Отдельный ключ (notifications_max) и отдельный метод: пока MAX лежал в
+// общей строке notifications, сохранение Telegram записывало туда пустые
+// поля MAX, и настройки мессенджера пропадали из интерфейса.
+func (r *DetectionSettingsRepo) UpdateMaxSettings(ctx context.Context, cfg domain.MaxConfig) error {
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("собрать настройки MAX: %w", err)
+	}
+	_, err = r.db.Exec(ctx, `
+		INSERT INTO server_settings (key, value, updated_at) VALUES ($1, $2::jsonb, now())
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+		"notifications_max", string(b))
+	if err != nil {
+		return fmt.Errorf("сохранить настройки MAX: %w", err)
+	}
+	return nil
+}
+
 // UpdatePushSettings сохраняет настройки канала push.
 //
 // Отдельным ключом и отдельным методом: страница настроек у канала своя, и
 // сохранение настроек Telegram не должно его затирать. По той же причине свои
-// значения отдельно держит канал MAX.
+// значения отдельно держат каналы MAX и системные уведомления.
 func (r *DetectionSettingsRepo) UpdatePushSettings(ctx context.Context, cfg domain.PushConfig) error {
 	b, err := json.Marshal(cfg)
 	if err != nil {
@@ -497,6 +526,11 @@ func (r *DetectionSettingsRepo) UpdatePushSettings(ctx context.Context, cfg doma
 	return nil
 }
 
+// UpdateServerSettings сохраняет переданные секции настроек.
+//
+// Каждый канал уведомлений пишется своим ключом: так сохранение одной
+// страницы интерфейса не затирает поля другой. В ключ notifications идёт
+// только Telegram, MAX — в notifications_max, push — в notifications_push.
 func (r *DetectionSettingsRepo) UpdateServerSettings(ctx context.Context, req domain.UpdateServerSettingsRequest) (*domain.ServerSettings, error) {
 	save := func(key string, val any) error {
 		b, err := json.Marshal(val)
@@ -521,7 +555,15 @@ func (r *DetectionSettingsRepo) UpdateServerSettings(ctx context.Context, req do
 		}
 	}
 	if req.Notifications != nil {
-		if err := save("notifications", req.Notifications); err != nil {
+		// В ключ notifications пишем ТОЛЬКО Telegram. MAX хранится
+		// отдельным ключом (см. UpdateMaxSettings): пока оба канала
+		// лежали в одной строке, сохранение одного затирало другой —
+		// в запросе с настройками Telegram поля MAX оставались пустыми,
+		// и настройки MAX «сами пропадали».
+		telegram := struct {
+			Telegram domain.TelegramConfig `json:"telegram"`
+		}{Telegram: req.Notifications.Telegram}
+		if err := save("notifications", telegram); err != nil {
 			return nil, fmt.Errorf("save notifications settings: %w", err)
 		}
 	}

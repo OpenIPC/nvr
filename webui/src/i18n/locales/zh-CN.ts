@@ -2157,6 +2157,12 @@ export default {
     howIsapi: '通过 ISAPI',
     howCgi: '通过 CGI API',
     howHttpHeaders: '通过 HTTP 头',
+
+    sourceScan: '通过子网扫描找到',
+    sourceWsd: '响应了 WS-Discovery',
+    sourceMdns: '在 mDNS 中广播',
+    sourcePeers: '来自 OpenIPC 邻居列表',
+    sourceLabel: '发现方式：',
   },
 
   ptzPanel: {

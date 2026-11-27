@@ -186,6 +186,15 @@ func (s *CameraScanner) Scan(ctx context.Context, req domain.ScanRequest) (*doma
 	// всегда, и на ней проверка не должна ничего менять.
 	result.Reachable = s.subnetReachable(ctx, ipnet, ips)
 
+	// Пассивное обнаружение идёт до активного перебора: камеры, которые
+	// сами назвались по WS-Discovery, mDNS или через реестр соседей,
+	// находятся за полторы секунды. Их адреса добавляются к списку живых,
+	// и перебор подсети для них уже не нужен.
+	passive := s.discoverPassive(ctx)
+	if n := len(passive.ips()); n > 0 {
+		log.Info().Int("passive", n).Msg("устройства ответили сами — WS-Discovery, mDNS или реестр соседей")
+	}
+
 	// Этап 1: быстрый отбор живых адресов.
 	//
 	// Опрашивать HTTP-API всех 254 адресов нельзя: на каждый уходит до
@@ -193,6 +202,7 @@ func (s *CameraScanner) Scan(ctx context.Context, req domain.ScanRequest) (*doma
 	// Сначала за одну-две секунды выясняем, кто вообще отвечает, и только
 	// их проверяем протоколами камер.
 	alive := s.findAliveHosts(ctx, ips)
+	alive = mergePassiveAlive(passive, alive)
 	log.Info().Int("alive", len(alive)).Int("total", len(ips)).
 		Msg("живые адреса отобраны — начинаю опрос протоколов")
 
@@ -259,9 +269,19 @@ func (s *CameraScanner) Scan(ctx context.Context, req domain.ScanRequest) (*doma
 				withCredHint(ctx, req.Username, req.Password), perCameraBudget)
 			defer cancel()
 
-			cam := s.probeCamera(camCtx, ip.String(), req.Username, req.Password)
+			ipStr := ip.String()
+			hit := passive.get(ipStr)
+
+			cam := s.probeCamera(camCtx, ipStr, req.Username, req.Password)
+			if cam == nil && hit != nil {
+				// Устройство назвалось само, но на протокольные запросы не
+				// ответило: закрыт HTTP, другие учётные данные или это вовсе
+				// не камера. Показываем хотя бы то, что известно из объявления.
+				cam = cameraFromPassive(ipStr, hit)
+			}
 			if cam != nil {
-				if mac := s.getMAC(ip.String()); mac != "" {
+				cam.Source = sourceCode(hit)
+				if mac := s.getMAC(ipStr); mac != "" {
 					cam.MAC = mac
 				}
 				mu.Lock()

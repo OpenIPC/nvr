@@ -2191,6 +2191,12 @@ export default {
     howIsapi: 'ISAPI로',
     howCgi: 'CGI API로',
     howHttpHeaders: 'HTTP 헤더로',
+
+    sourceScan: '서브넷 검색으로 찾음',
+    sourceWsd: 'WS-Discovery 응답',
+    sourceMdns: 'mDNS로 알림',
+    sourcePeers: 'OpenIPC 이웃 목록',
+    sourceLabel: '발견:',
   },
 
   ptzPanel: {

@@ -335,6 +335,15 @@ export default function ScannerPage() {
                             {howFoundText(t, cam.how_found)}
                           </div>
                         )}
+                        {/* Откуда устройство известно. Пассивные находки
+                            (WS-Discovery, mDNS, реестр соседей) приходят без
+                            перебора подсети и без паролей — по подписи видно,
+                            чему верить, если камера не опросилась. */}
+                        {cam.source && (
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                            {t('scannerPage.sourceLabel')} {sourceText(t, cam.source)}
+                          </div>
+                        )}
                         {/* Тип устройства: у домофона нет потока, и проверять
                             его «проверкой потока» бессмысленно. */}
                         {cam.device_type === 'intercom' && (
@@ -491,6 +500,30 @@ const HOW_FOUND_KEYS: Record<string, string> = {
 }
 
 /** Подписи к причинам, по которым камер не нашлось. */
+/**
+ * Подписи к источникам обнаружения.
+ *
+ * Сервер отдаёт коды (scan, wsd, mdns, peers), а не готовый текст: подпись
+ * должна быть на языке интерфейса. Несколько источников приходят через
+ * запятую — показываем все, чтобы было видно, например, что адрес пришёл
+ * и по mDNS, и из списка соседей.
+ */
+const SOURCE_KEYS: Record<string, string> = {
+  scan: 'scannerPage.sourceScan',
+  wsd: 'scannerPage.sourceWsd',
+  mdns: 'scannerPage.sourceMdns',
+  peers: 'scannerPage.sourcePeers',
+}
+
+function sourceText(t: (key: string) => string, code: string): string {
+  return code
+    .split(',')
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .map((c) => (SOURCE_KEYS[c] ? t(SOURCE_KEYS[c]) : c))
+    .join(', ')
+}
+
 const NOTE_KEYS: Record<string, string> = {
   subnet_unreachable: 'scannerPage.noteSubnetUnreachable',
   no_hosts: 'scannerPage.noteNoHosts',

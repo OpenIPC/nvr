@@ -65,16 +65,12 @@ func notReadyStub(t *testing.T, failTimes int) (*httptest.Server, *int) {
 func TestMaxRetriesNotReadyAttachment(t *testing.T) {
 	srv, attempts := notReadyStub(t, 2)
 
-	old := maxAPIBase
-	maxAPIBase = srv.URL
-	t.Cleanup(func() { maxAPIBase = old })
+	c := newMaxForStub(t, srv)
 
 	// Паузы между повторами в тесте не нужны: проверяется сам факт повтора.
 	oldDelay := maxRetryDelay
 	maxRetryDelay = 0
 	t.Cleanup(func() { maxRetryDelay = oldDelay })
-
-	c := NewMax()
 
 	done := make(chan error, 1)
 	go func() {
@@ -103,16 +99,12 @@ func TestMaxRetriesNotReadyAttachment(t *testing.T) {
 func TestMaxNotReadyTypeIsDetected(t *testing.T) {
 	srv, _ := notReadyStub(t, 100)
 
-	old := maxAPIBase
-	maxAPIBase = srv.URL
-	t.Cleanup(func() { maxAPIBase = old })
+	c := newMaxForStub(t, srv)
 
 	// Без пауз тест проверяет распознавание ошибки, а не ожидание.
 	oldDelay := maxRetryDelay
 	maxRetryDelay = 0
 	t.Cleanup(func() { maxRetryDelay = oldDelay })
-
-	c := NewMax()
 
 	err := c.SendMessage(context.Background(), "tok", "456", "текст")
 	if err == nil {
