@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext'
 import { usePermissions } from '../context/PermissionsContext'
 import { authToken, onHostToggleTalk } from '../host/hostBridge'
 import LivePlayer from '../components/LivePlayer'
+import LiveOsd from '../components/LiveOsd'
 import EditCameraModal from '../components/EditCameraModal'
 import PTZPanel from '../components/PTZPanel'
 import DetectionSettingsPanel from '../components/DetectionSettingsPanel'
@@ -474,6 +475,9 @@ export default function CameraDetailPage() {  const { id } = useParams<{ id: str
                   enabled={isOnline}
                   lagSeconds={0}
                 />
+                {/* Своё OSD: имя камеры и время сервера. Рисуется в
+                    браузере, поток не перекодируется. */}
+                <LiveOsd name={camera.name} />
               </LivePlayer>
             ) : (
               <div className="video-placeholder" style={{ position: 'relative' }}>

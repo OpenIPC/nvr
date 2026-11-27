@@ -7,6 +7,7 @@ import type { ApiClient } from '../net/api';
 import { joinUrl } from '../net/address';
 import { openLiveSession, type LiveSession } from '../net/webrtc';
 import { colors, radius, spacing } from '../theme';
+import LiveOsd from './LiveOsd';
 
 /**
  * Плеер живого просмотра: сначала WebRTC, при неудаче — HLS.
@@ -23,6 +24,7 @@ import { colors, radius, spacing } from '../theme';
 export default function LivePlayer({
   client,
   cameraId,
+  cameraName,
   sub,
   hlsPath,
   token,
@@ -33,6 +35,8 @@ export default function LivePlayer({
 }: {
   client: ApiClient | null;
   cameraId: string;
+  /** Имя камеры для OSD поверх видео. Не передано — показываем только время. */
+  cameraName?: string;
   /** Дополнительный поток камеры — экономит трафик в мобильной сети. */
   sub: boolean;
   /** Адрес HLS-плейлиста (в HLS-ветке), относительный. */
@@ -58,6 +62,9 @@ export default function LivePlayer({
   const [transport, setTransport] = useState<'webrtc' | 'hls'>('webrtc');
   const [session, setSession] = useState<LiveSession | null>(null);
   const [status, setStatus] = useState<string | null>(t('player.connecting'));
+  // Размер контейнера с видео: по нему OSD переводит рамки событий в
+  // координаты экрана. Поля от «contain» тоже учитываются там.
+  const [layout, setLayout] = useState({ width: 0, height: 0 });
   const hlsRetriesRef = useRef(0);
   const [hlsReloadKey, setHlsReloadKey] = useState(0);
 
@@ -163,7 +170,15 @@ export default function LivePlayer({
   };
 
   return (
-    <View style={styles.box}>
+    <View
+      style={styles.box}
+      onLayout={(event) =>
+        setLayout({
+          width: event.nativeEvent.layout.width,
+          height: event.nativeEvent.layout.height,
+        })
+      }
+    >
       {transport === 'webrtc' && session ? (
         <RTCView
           streamURL={session.stream.toURL()}
@@ -196,6 +211,17 @@ export default function LivePlayer({
           {status ? <Text style={styles.placeholderText}>{status}</Text> : null}
         </View>
       )}
+
+      {layout.width > 0 ? (
+        <LiveOsd
+          client={client}
+          cameraId={cameraId}
+          cameraName={cameraName}
+          width={layout.width}
+          height={layout.height}
+          active={!!session || (transport === 'hls' && !!hlsUrl)}
+        />
+      ) : null}
 
       {session ? (
         <View style={styles.badge}>

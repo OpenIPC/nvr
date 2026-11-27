@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { camerasAPI, type Camera, type StreamInfo } from '../api/client'
 import LivePlayer from '../components/LivePlayer'
+import LiveOsd from '../components/LiveOsd'
 import DetectionOverlay from '../components/DetectionOverlay'
 import { useToast } from '../context/ToastContext'
 import { LayoutGrid, X, Maximize2, Minimize2, Check, Loader2, RefreshCw } from 'lucide-react'
@@ -396,6 +397,9 @@ export default function GridPage() {  const toast = useToast()
                   enabled
                   lagSeconds={0}
                 />
+                {/* При развороте имя камеры стоит плашкой сверху, поэтому
+                    OSD снизу показывает только время сервера и дату. */}
+                <LiveOsd position="bl" />
               </LivePlayer>
               <div style={{
                 position: 'absolute', top: 8, left: 8, display: 'flex',
@@ -545,7 +549,12 @@ export default function GridPage() {  const toast = useToast()
                         preferMse
                         muted
                         showControls={false}
-                      />
+                      >
+                        {/* Время сервера в углу ячейки. Имя камеры уже
+                            показано полосой снизу, поэтому здесь только
+                            метка времени — иначе она дублировалась бы. */}
+                        <LiveOsd compact />
+                      </LivePlayer>
                     ) : (
                       <div style={{
                         position: 'absolute', inset: 0, display: 'flex',

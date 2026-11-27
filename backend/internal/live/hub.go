@@ -49,6 +49,16 @@ type Event struct {
 	TriggerDetail string `json:"trigger_detail,omitempty"`
 	MatchedName   string `json:"matched_name,omitempty"`
 
+	// Рамка объекта и размер кадра, в координатах которого она задана.
+	//
+	// Нужны клиентам, чтобы нарисовать наложение поверх живого видео.
+	// Раньше рамки брались опросом журнала событий: на стене из
+	// шестнадцати ячеек это шестнадцать запросов в секунду. В потоке
+	// событие приходит сразу и без нагрузки на API.
+	BBox   map[string]float64 `json:"bbox,omitempty"`
+	FrameW int                `json:"frame_w,omitempty"`
+	FrameH int                `json:"frame_h,omitempty"`
+
 	// SnapshotURL — путь снимка относительно API. Клиент добавляет
 	// к нему адрес сервера и токен.
 	SnapshotURL string `json:"snapshot_url,omitempty"`

@@ -143,6 +143,11 @@ func (h *LiveHandler) Stream(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ticker.C:
 			fmt.Fprint(w, ": keep-alive\n\n")
+			// Часы сервера: клиенты (стена) выравнивают по ним OSD даже в
+			// тишине, когда событий нет. Двадцать секунд — та же частота,
+			// что и у комментария: отдельный таймер не нужен.
+			fmt.Fprintf(w, "event: clock\ndata: {\"time\":%q}\n\n",
+				time.Now().In(localZone()).Format(time.RFC3339))
 			controller.Flush()
 		case ev, ok := <-sub.Events():
 			if !ok {

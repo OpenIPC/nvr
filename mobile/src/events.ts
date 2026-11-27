@@ -15,6 +15,14 @@ export interface DetectionEvent {
   timestamp: string;
   object_class: string;
   confidence: number;
+  /**
+   * Рамка объекта в пикселях кадра детекции.
+   *
+   * Нужна наложению OSD: телефон рисует прямоугольник поверх живого видео.
+   * Размер кадра лежит в metadata.frame_w/frame_h — без него пиксели не
+   * перевести в доли картинки.
+   */
+  bbox?: { x: number; y: number; w: number; h: number };
   /** Причина события: object, line, face, plate, audio, camera. */
   trigger_type?: string;
   matched_name?: string;

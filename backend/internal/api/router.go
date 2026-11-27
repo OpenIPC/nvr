@@ -341,8 +341,9 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 	// бэкенд только передаёт ей команды и показывает результат.
 	hostH := handlers.NewHostHandler(cfg.HostAgent)
 
-	// Проверка и установка обновлений. Каталог установки и адрес
-	// репозитория берём из настроек: адрес не вшит в код, потому что
+        // Время сервера для метки на видео. Клиенты запрашивают его один раз
+        // и дальше тикают по смещению своих часов, не дёргая API ежесекундно.
+        clockH := handlers.NewClockHandler()
 	// установки живут на разных площадках. Сохранённые в интерфейсе
 	// адрес, ветка и токен имеют приоритет над значениями .env.
 	updatesH := handlers.NewUpdatesHandler(
@@ -683,6 +684,9 @@ func NewRouter(cfg RouterConfig) *chi.Mux {
 			// в каталоге установки, а не образ, иначе хеш пришлось бы
 			// вшивать в образ при сборке.
 			r.Get("/version", updatesH.Version)
+			// Время сервера: по нему клиенты рисуют метку на видео,
+			// чтобы она совпадала с архивом при сбитых часах клиента.
+			r.Get("/time", clockH.Now)
 			r.Get("/updates/check", updatesH.Check)
 			r.Post("/updates/apply", updatesH.Apply)
 			r.Post("/updates/rollback", updatesH.Rollback)

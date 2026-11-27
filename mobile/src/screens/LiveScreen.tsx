@@ -160,6 +160,7 @@ export default function LiveScreen({
       <LivePlayer
         client={client}
         cameraId={camera.id}
+        cameraName={camera.name}
         sub={kind === 'sub'}
         hlsPath={hlsPath}
         token={token}

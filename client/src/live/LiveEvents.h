@@ -5,6 +5,7 @@
 #include <QVariantMap>
 #include <QByteArray>
 #include <QNetworkAccessManager>
+#include <QtGlobal>
 
 class ApiClient;
 class QNetworkReply;
@@ -34,6 +35,16 @@ class LiveEvents : public QObject
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     /** Последнее событие — карточка тревоги берёт данные отсюда. */
     Q_PROPERTY(QVariantMap lastEvent READ lastEvent NOTIFY eventReceived)
+    /**
+     * Поправка часов клиента к серверу, миллисекунды.
+     *
+     * Время события приходит от сервера. Разница между ним и локальными
+     * часами — и есть поправка: дежурная машина может отставать, а метка
+     * на видео должна совпадать с метками событий и архива.
+     */
+    Q_PROPERTY(qint64 serverOffsetMs READ serverOffsetMs NOTIFY serverTimeChanged)
+    /** Смещение пояса сервера от UTC в секундах (для показа его времени). */
+    Q_PROPERTY(int serverTzOffsetSec READ serverTzOffsetSec NOTIFY serverTimeChanged)
 
 public:
     explicit LiveEvents(ApiClient *api, QObject *parent = nullptr);
@@ -41,6 +52,8 @@ public:
     bool connected() const { return m_connected; }
     QString lastError() const { return m_lastError; }
     QVariantMap lastEvent() const { return m_lastEvent; }
+    qint64 serverOffsetMs() const { return m_serverOffsetMs; }
+    int serverTzOffsetSec() const { return m_serverTzOffsetSec; }
 
     /** Открывает поток. Повторный вызов ничего не делает. */
     Q_INVOKABLE void start();
@@ -52,6 +65,8 @@ signals:
     void lastErrorChanged();
     /** Пришло событие: разбор — на стороне интерфейса. */
     void eventReceived(QVariantMap event);
+    /** Обновилась поправка часов сервера (пришло событие со временем). */
+    void serverTimeChanged();
 
 private:
     void setConnected(bool value);
@@ -87,4 +102,7 @@ private:
     bool m_connected = false;
     QString m_lastError;
     QVariantMap m_lastEvent;
+    // Поправка часов и пояс сервера — из времени последнего события.
+    qint64 m_serverOffsetMs = 0;
+    int m_serverTzOffsetSec = 0;
 };

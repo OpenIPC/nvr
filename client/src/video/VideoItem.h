@@ -3,6 +3,7 @@
 #include <QQuickPaintedItem>
 #include <QImage>
 #include <QMutex>
+#include <QRectF>
 
 /**
  * Элемент QML, который рисует кадр с камеры.
@@ -24,10 +25,31 @@ class VideoItem : public QQuickPaintedItem
 {
     Q_OBJECT
 
+    /**
+     * Размер последнего принятого кадра.
+     *
+     * Нужен наложению: рамки событий заданы в пикселях кадра камеры, а
+     * элемент рисует кадр с сохранением пропорций и полями. Без размера
+     * кадра координаты не перевести в координаты ячейки.
+     */
+    Q_PROPERTY(int frameWidth READ frameWidth NOTIFY frameSizeChanged)
+    Q_PROPERTY(int frameHeight READ frameHeight NOTIFY frameSizeChanged)
+
 public:
     explicit VideoItem(QQuickItem *parent = nullptr);
 
     void paint(QPainter *painter) override;
+
+    int frameWidth() const;
+    int frameHeight() const;
+
+    /**
+     * Переводит нормализованную рамку (доли кадра 0..1) в координаты
+     * элемента с учётом полей от «вписать с сохранением пропорций».
+     *
+     * Пустой прямоугольник — кадра ещё нет.
+     */
+    Q_INVOKABLE QRectF normalizedRect(qreal x, qreal y, qreal w, qreal h) const;
 
 public slots:
     /** Новый кадр. Можно вызывать из любого потока. */
@@ -35,7 +57,11 @@ public slots:
     /** Убрать кадр: ячейка показывает снимок или надпись. */
     void clearFrame();
 
+signals:
+    /** Сменился размер кадра: наложение должно пересчитать координаты. */
+    void frameSizeChanged();
+
 private:
-    QMutex m_mutex;
+    mutable QMutex m_mutex;
     QImage m_image;
 };

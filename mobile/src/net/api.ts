@@ -516,6 +516,25 @@ export class ApiClient {
     return response.data as EventsPage;
   }
 
+  /**
+   * Время сервера.
+   *
+   * Телефон рисует метку времени на живом видео; часы устройства могут
+   * отставать или идти в другом поясе, поэтому смещение берётся у сервера.
+   */
+  async getServerTime(): Promise<{
+    time: string;
+    unix: number;
+    timezone: string;
+    offset_seconds: number;
+  }> {
+    const response = await this.http.get('/time');
+    if (response.status !== 200) {
+      throw toApiError(response.status, response.data, new Error('time'));
+    }
+    return response.data;
+  }
+
   /** Список контроллеров СКУД. */
   async listAccessControllers(): Promise<AccessController[]> {
     const response = await this.http.get('/acs/controllers');

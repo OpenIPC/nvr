@@ -14,6 +14,85 @@ Window {
     property string cameraId: ""
     property string cameraName: ""
 
+    /** Время сервера для OSD; обновляется раз в секунду. */
+    property string clockText: ""
+    /** Рамки детекций этой камеры: {x,y,w,h} в долях кадра. */
+    property var alarmBoxes: []
+
+    function pad2(value) {
+        return value < 10 ? "0" + value : "" + value
+    }
+
+    function refreshClock() {
+        var d = new Date(Date.now() + Live.serverOffsetMs
+                         + Live.serverTzOffsetSec * 1000)
+        viewer.clockText = pad2(d.getUTCDate()) + "." + pad2(d.getUTCMonth() + 1)
+            + "." + d.getUTCFullYear() + " "
+            + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + ":"
+            + pad2(d.getUTCSeconds())
+    }
+
+    function addAlarmBox(event) {
+        var b = event.bbox
+        var fw = Number(event.frame_w)
+        var fh = Number(event.frame_h)
+        if (!b || !(fw > 0) || !(fh > 0)) {
+            return
+        }
+        var list = viewer.alarmBoxes.slice()
+        list.push({
+            x: Number(b.x) / fw,
+            y: Number(b.y) / fh,
+            w: Number(b.w) / fw,
+            h: Number(b.h) / fh,
+            cls: event.object_class || "",
+            expires: Date.now() + 2500
+        })
+        if (list.length > 20) {
+            list = list.slice(list.length - 20)
+        }
+        viewer.alarmBoxes = list
+    }
+
+    function pruneBoxes() {
+        if (viewer.alarmBoxes.length === 0) {
+            return
+        }
+        var now = Date.now()
+        var kept = []
+        for (var i = 0; i < viewer.alarmBoxes.length; ++i) {
+            if (viewer.alarmBoxes[i].expires > now) {
+                kept.push(viewer.alarmBoxes[i])
+            }
+        }
+        if (kept.length !== viewer.alarmBoxes.length) {
+            viewer.alarmBoxes = kept
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: viewer.refreshClock()
+    }
+
+    Timer {
+        interval: 500
+        running: true
+        repeat: true
+        onTriggered: viewer.pruneBoxes()
+    }
+
+    Connections {
+        target: Live
+        function onEventReceived(event) {
+            if (event.type === "detection" && event.camera_id === viewer.cameraId) {
+                viewer.addAlarmBox(event)
+            }
+        }
+    }
+
     color: "#000000"
     title: cameraName.length > 0 ? cameraName : qsTr("Камера")
     // Видимостью управляем только через visibility. Обращаться сразу
@@ -102,6 +181,34 @@ Window {
             visible: player.active
         }
 
+        // Рамки детекций этой камеры. Перевод в координаты окна делает
+        // VideoItem.normalizedRect с учётом полей от «вписать».
+        Repeater {
+            model: viewer.alarmBoxes
+            delegate: Rectangle {
+                readonly property var mapped: {
+                    var cellW = video.width
+                    var cellH = video.height
+                    var frameW = video.frameWidth
+                    var frameH = video.frameHeight
+                    if (!cellW || !cellH || !frameW || !frameH) {
+                        return Qt.rect(0, 0, 0, 0)
+                    }
+                    return video.normalizedRect(modelData.x, modelData.y,
+                                                modelData.w, modelData.h)
+                }
+                x: mapped.x
+                y: mapped.y
+                width: mapped.width
+                height: mapped.height
+                visible: player.active && width > 0 && height > 0
+                color: "transparent"
+                border.width: 2
+                radius: 2
+                border.color: modelData.cls === "person" ? "#34c759" : "#0a84ff"
+            }
+        }
+
         // Пока поток не пошёл — снимок кадра: чёрный прямоугольник на
         // весь экран не отличить от неработающей камеры.
         Image {
@@ -163,6 +270,14 @@ Window {
                     text: viewer.cameraName.length > 0 ? viewer.cameraName : qsTr("Камера")
                     color: "white"
                     font.pixelSize: 16
+                }
+
+                // Время сервера: то же, что на стене и в архиве.
+                Label {
+                    text: viewer.clockText
+                    color: "white"
+                    font.pixelSize: 14
+                    font.family: "monospace"
                 }
 
                 Label {

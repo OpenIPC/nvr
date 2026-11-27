@@ -3,6 +3,7 @@
 #include "api/ApiClient.h"
 
 #include <QDebug>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QNetworkReply>
@@ -38,6 +39,10 @@ LiveEvents::LiveEvents(ApiClient *api, QObject *parent)
     : QObject(parent)
     , m_api(api)
 {
+    // До первого события OSD показывает время в поясе рабочей машины:
+    // смещение 0 дало бы UTC и метку на несколько часов неверную.
+    m_serverTzOffsetSec = QDateTime::currentDateTime().offsetFromUtc();
+
     m_reconnect = new QTimer(this);
     m_reconnect->setSingleShot(true);
     m_reconnect->setInterval(kReconnectMs);
@@ -233,6 +238,35 @@ void LiveEvents::handleLine(const QByteArray &line)
         if (!type.isEmpty()) {
             event.insert(QStringLiteral("type"), QString::fromUtf8(type));
         }
+
+        // Время события пришло от сервера. Разница с локальными часами —
+        // поправка для OSD: метка на видео должна совпадать с событиями
+        // и архивом, даже если часы дежурной машины сбиты.
+        const QString timeText = event.value(QStringLiteral("time")).toString();
+        QDateTime serverTime = QDateTime::fromString(timeText, Qt::ISODateWithMs);
+        if (!serverTime.isValid()) {
+            // Go отдаёт доли секунды переменной длины; не всякая сборка Qt
+            // разбирает их как ISODateWithMs.
+            serverTime = QDateTime::fromString(timeText, Qt::ISODate);
+        }
+        if (serverTime.isValid()) {
+            const qint64 offset = serverTime.toMSecsSinceEpoch()
+                - QDateTime::currentMSecsSinceEpoch();
+            const int tzOffset = serverTime.offsetFromUtc();
+            if (offset != m_serverOffsetMs || tzOffset != m_serverTzOffsetSec) {
+                m_serverOffsetMs = offset;
+                m_serverTzOffsetSec = tzOffset;
+                emit serverTimeChanged();
+            }
+        }
+
+        // Служебное событие часов: интерфейсу оно не показывается, нужна
+        // только поправка выше. Иначе карточка тревоги приняла бы его за
+        // событие и показала пустую плашку.
+        if (type == "clock") {
+            return;
+        }
+
         m_lastEvent = event;
         emit eventReceived(event);
         return;

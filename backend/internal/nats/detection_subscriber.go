@@ -349,6 +349,32 @@ func (s *DetectionSubscriber) saveAudioEvent(ctx context.Context, ev *AudioEvent
 	return nil
 }
 
+// frameSize достаёт размер кадра детекции из метаданных события.
+//
+// Детектор присылает его числами, но после разбора JSON это float64;
+// int встречается в тестах и при ручной сборке события. Неизвестный тип
+// даёт 0 — наложение тогда не рисуется, а событие сохраняется как обычно:
+// размер кадра нужен только для показа рамки.
+func frameSize(meta map[string]any) (int, int) {
+	num := func(key string) int {
+		switch v := meta[key].(type) {
+		case float64:
+			return int(v)
+		case int:
+			return v
+		case json.Number:
+			n, err := v.Int64()
+			if err != nil {
+				return 0
+			}
+			return int(n)
+		default:
+			return 0
+		}
+	}
+	return num("frame_w"), num("frame_h")
+}
+
 func (s *DetectionSubscriber) saveEvent(ctx context.Context, ev *DetectionEvent) error {
 	eventID := uuid.New()
 	eventTime := time.Unix(int64(ev.Timestamp), int64((ev.Timestamp-float64(int64(ev.Timestamp)))*1e9))
@@ -484,6 +510,10 @@ func (s *DetectionSubscriber) saveEvent(ctx context.Context, ev *DetectionEvent)
 	// Событие операторам — сразу после сохранения: тревога должна появиться
 	// на стене в тот же момент, когда о ней можно спросить архив.
 	if s.live != nil {
+		// Размер кадра нужен клиентам для наложения: рамка задана в
+		// пикселях кадра детекции, а картинка на экране — другого
+		// размера. Без него координаты не перевести в доли кадра.
+		frameW, frameH := frameSize(ev.Metadata)
 		s.live.Publish(live.Event{
 			Type:          "detection",
 			Time:          eventTime,
@@ -492,13 +522,15 @@ func (s *DetectionSubscriber) saveEvent(ctx context.Context, ev *DetectionEvent)
 			CameraName:    cameraName,
 			ObjectClass:   ev.ObjectClass,
 			Confidence:    ev.Confidence,
+			BBox:          ev.BBox,
+			FrameW:        frameW,
+			FrameH:        frameH,
 			TriggerType:   string(trigger),
 			TriggerDetail: detail,
 			MatchedName:   match.Name,
 			SnapshotURL:   snapshotURL,
 		})
 	}
-
 	// Рассылка внешним подписчикам — сразу после сохранения, а не вместе
 	// с уведомлением: умный дом ждёт событие мгновенно, и задерживать его
 	// сборкой клипа или отправкой в мессенджер нельзя. Имя камеры берём

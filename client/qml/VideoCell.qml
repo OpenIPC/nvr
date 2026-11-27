@@ -22,6 +22,19 @@ Rectangle {
      */
     property bool alarmed: false
 
+    /** Имя камеры для OSD. Обновляется при загрузке списка камер. */
+    property string cameraTitle: ""
+    /** Время сервера одной строкой; обновляется раз в секунду. */
+    property string clockText: ""
+    /**
+     * Рамки детекций из потока событий.
+     *
+     * Массив {x,y,w,h} в долях кадра и время истечения. Рамка живёт
+     * несколько секунд после события: одиночный кадр на видео заметить
+     * невозможно, а событие приходит раз в секунду.
+     */
+    property var alarmBoxes: []
+
     // Сигналы названы не так, как свойство: одноимённые свойство и сигнал
     // конфликтуют — Qt берёт свойство, и вызов «selected()» перестаёт быть
     // функцией (видели эту ошибку в журнале на стенде).
@@ -38,7 +51,11 @@ Rectangle {
         id: player
     }
 
-    Component.onCompleted: console.log("ячейка", cell.cellIndex, "готова")
+    Component.onCompleted: {
+        console.log("ячейка", cell.cellIndex, "готова")
+        cell.updateTitle()
+        cell.refreshClock()
+    }
 
     // Субпоток: в сетке 4×4 основной поток не поднять на 16 ячеек.
     //
@@ -53,6 +70,105 @@ Rectangle {
     onCameraIdChanged: {
         if (cell.cameraId.length > 0) {
             Api.prepareStream(cell.cameraId)
+        }
+        cell.updateTitle()
+    }
+
+    /** Имя камеры: список приходит с сервера и может обновиться позже. */
+    function updateTitle() {
+        cell.cameraTitle = cell.cameraId.length > 0 ? Api.cameraName(cell.cameraId) : ""
+    }
+
+    function pad2(value) {
+        return value < 10 ? "0" + value : "" + value
+    }
+
+    /**
+     * Время сервера в его поясе.
+     *
+     * Поправка часов и смещение пояса приходят из потока событий
+     * (см. LiveEvents): часы дежурной машины могут отставать, а метка
+     * на видео должна совпадать с метками событий и архива.
+     */
+    function refreshClock() {
+        var d = new Date(Date.now() + Live.serverOffsetMs
+                         + Live.serverTzOffsetSec * 1000)
+        cell.clockText = pad2(d.getUTCDate()) + "." + pad2(d.getUTCMonth() + 1)
+            + "." + d.getUTCFullYear() + " "
+            + pad2(d.getUTCHours()) + ":" + pad2(d.getUTCMinutes()) + ":"
+            + pad2(d.getUTCSeconds())
+    }
+
+    /** Добавляет рамку из события; координаты переводим в доли кадра. */
+    function addAlarmBox(event) {
+        var b = event.bbox
+        var fw = Number(event.frame_w)
+        var fh = Number(event.frame_h)
+        if (!b || !(fw > 0) || !(fh > 0)) {
+            return
+        }
+        var list = cell.alarmBoxes.slice()
+        list.push({
+            x: Number(b.x) / fw,
+            y: Number(b.y) / fh,
+            w: Number(b.w) / fw,
+            h: Number(b.h) / fh,
+            cls: event.object_class || "",
+            expires: Date.now() + 2500
+        })
+        // Больше двадцати рамок одновременно оператор всё равно не различит.
+        if (list.length > 20) {
+            list = list.slice(list.length - 20)
+        }
+        cell.alarmBoxes = list
+    }
+
+    /** Убирает рамки, чьи события уже не свежие. */
+    function pruneBoxes() {
+        if (cell.alarmBoxes.length === 0) {
+            return
+        }
+        var now = Date.now()
+        var kept = []
+        for (var i = 0; i < cell.alarmBoxes.length; ++i) {
+            if (cell.alarmBoxes[i].expires > now) {
+                kept.push(cell.alarmBoxes[i])
+            }
+        }
+        if (kept.length !== cell.alarmBoxes.length) {
+            cell.alarmBoxes = kept
+        }
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: cell.refreshClock()
+    }
+
+    Timer {
+        interval: 500
+        running: true
+        repeat: true
+        onTriggered: cell.pruneBoxes()
+    }
+
+    Connections {
+        target: Api
+        function onCamerasChanged() {
+            cell.updateTitle()
+        }
+    }
+
+    Connections {
+        target: Live
+        function onEventReceived(event) {
+            // Рамки нужны только этой камере. Остальные события (тревоги,
+            // звук, СКУД) обрабатывает стена.
+            if (event.type === "detection" && event.camera_id === cell.cameraId) {
+                cell.addAlarmBox(event)
+            }
         }
     }
 
@@ -77,6 +193,43 @@ Rectangle {
         id: video
         anchors.fill: parent
         visible: player.active
+    }
+
+    // Рамки детекций поверх видео.
+    //
+    // Координаты событий заданы в пикселях кадра камеры, а элемент рисует
+    // кадр с полями от «вписать с сохранением пропорций». Перевод делает
+    // VideoItem.normalizedRect — та же формула, что и в самой отрисовке,
+    // поэтому рамка не разъезжается с картинкой.
+    Repeater {
+        model: cell.alarmBoxes
+        delegate: Rectangle {
+            readonly property var mapped: {
+                // Обращение к свойствам нужно для пересчёта при смене
+                // размера ячейки или кадра: вызов функции сам по себе
+                // зависимость в QML не создаёт.
+                var cellW = video.width
+                var cellH = video.height
+                var frameW = video.frameWidth
+                var frameH = video.frameHeight
+                if (!cellW || !cellH || !frameW || !frameH) {
+                    return Qt.rect(0, 0, 0, 0)
+                }
+                return video.normalizedRect(modelData.x, modelData.y,
+                                            modelData.w, modelData.h)
+            }
+            x: mapped.x
+            y: mapped.y
+            width: mapped.width
+            height: mapped.height
+            visible: player.active && width > 0 && height > 0
+            color: "transparent"
+            border.width: 2
+            radius: 2
+            // Цвет как в веб-интерфейсе: человек и транспорт различаются
+            // с одного взгляда.
+            border.color: modelData.cls === "person" ? "#34c759" : "#0a84ff"
+        }
     }
 
     // Кадры приходят сигналом: элемент отрисовки рисует их в потоке сцены,
@@ -175,6 +328,41 @@ Rectangle {
         color: "#ff8a80"
         font.bold: true
         font.pixelSize: 11
+    }
+
+    // OSD поверх видео: имя камеры и время сервера.
+    //
+    // Рисуется клиентом, а не вжигается в поток: перекодировать шестнадцать
+    // потоков ради надписи положило бы машину, а рамки и текст на клиенте
+    // остаются чёткими при любом разрешении.
+    Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.margins: 4
+        visible: cell.cameraId.length > 0
+        color: "rgba(0,0,0,0.45)"
+        radius: 3
+        implicitWidth: osdColumn.implicitWidth + 10
+        implicitHeight: osdColumn.implicitHeight + 4
+
+        Column {
+            id: osdColumn
+            anchors.centerIn: parent
+            spacing: 0
+
+            Label {
+                text: cell.cameraTitle
+                color: "#fff"
+                font.pixelSize: 11
+                font.bold: true
+            }
+            Label {
+                text: cell.clockText
+                color: "#fff"
+                font.pixelSize: 11
+                font.family: "monospace"
+            }
+        }
     }
 
     MouseArea {
