@@ -113,6 +113,19 @@ export default function ServerSettingsPage() {
 
   const interfaces: NetworkInterface[] = useMemo(() => network?.interfaces ?? [], [network])
 
+  // Пояса группируем по первой части имени (Europe/Moscow -> Europe):
+  // плоский список из 500+ строк в выпадающем списке искать невозможно.
+  const zoneGroups = useMemo(() => {
+    const groups = new Map<string, string[]>()
+    for (const zone of zones) {
+      const region = zone.includes('/') ? zone.split('/')[0] : 'Other'
+      const list = groups.get(region)
+      if (list) list.push(zone)
+      else groups.set(region, [zone])
+    }
+    return [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  }, [zones])
+
   const applyStatus = useCallback((data: HostStatus) => {
     setStatus(data)
     if (data.time) {
@@ -350,19 +363,31 @@ export default function ServerSettingsPage() {
 
         <div style={{ marginBottom: 16 }}>
           <label style={labelStyle}>{t('serverPage.timezone')}</label>
-          <input
-            list="tz-list"
+          {/* Именно select, а не input с datalist: datalist браузер показывает
+              только после начала набора текста, и оператору кажется, что
+              список поясов пуст и выбрать нечего. */}
+          <select
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
-            placeholder="Europe/Moscow"
             style={inputStyle}
             disabled={!available}
-          />
-          <datalist id="tz-list">
-            {zones.map((z) => (
-              <option key={z} value={z} />
+          >
+            {/* Текущий пояс может отсутствовать в системном списке — тогда
+                показываем его отдельным пунктом, иначе select молча
+                переключился бы на первый пояс из списка. */}
+            {timezone && !zones.includes(timezone) && (
+              <option value={timezone}>{timezone}</option>
+            )}
+            {zoneGroups.map(([region, list]) => (
+              <optgroup key={region} label={region}>
+                {list.map((z) => (
+                  <option key={z} value={z}>
+                    {z}
+                  </option>
+                ))}
+              </optgroup>
             ))}
-          </datalist>
+          </select>
           <div style={hintStyle}>{t('serverPage.timezoneHint')}</div>
         </div>
 

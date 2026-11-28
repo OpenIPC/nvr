@@ -435,8 +435,10 @@ def read_time_state() -> dict:
         marker = "/zoneinfo/"
         if marker in target:
             state["timezone"] = target.split(marker, 1)[1]
-    if state["timezone"] == "UTC" and TIMEZONE_FILE.exists():
-        # Запасной путь: если ссылки нет, читаем файл.
+    # Запасной путь: если ссылки нет, читаем файл. Проверяем именно файл:
+    # на месте /etc/timezone может оказаться каталог, и read_text на нём
+    # падает с IsADirectoryError, ломая всю карточку настроек.
+    if state["timezone"] == "UTC" and TIMEZONE_FILE.is_file():
         state["timezone"] = TIMEZONE_FILE.read_text(encoding="utf-8").strip() or "UTC"
 
     # Подтверждаем значение у системы: она знает точнее любого файла.
@@ -717,17 +719,32 @@ def backup_and_write(path: Path, content: str) -> str:
 
     Копия делается всегда: без неё откат невозможен, а именно он
     защищает от потери связи при ошибке в настройках.
+
+    Каталог на месте файла — не ошибка. Так бывает с /etc/timezone:
+    в новых системах файла может не быть, а bind-mount из docker-compose
+    создаёт на его месте пустой каталог. Копировать каталог нельзя
+    (shutil.copy2 падает с EISDIR), поэтому проверяем тип и не трогаем
+    такие пути: рабочий пояс всё равно задаёт timedatectl через
+    /etc/localtime.
     """
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
+    if path.is_dir():
+        log.warning("%s — каталог, запись пропущена", path)
+        return ""
+
+    backup = ""
     if path.exists():
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = BACKUP_DIR / f"{path.name}.{stamp}.bak"
         shutil.copy2(path, backup)
         log.info("резервная копия %s -> %s", path, backup)
-        return str(backup)
 
-    return ""
+    # Собственно запись: раньше функция только копировала файл, из-за чего
+    # /etc/timezone оставался прежним, хотя вызов выглядел успешным.
+    path.write_text(content, encoding="utf-8")
+
+    return str(backup)
 
 
 def set_timezone(timezone: str) -> dict:
@@ -744,7 +761,14 @@ def set_timezone(timezone: str) -> dict:
     if timezone not in known:
         return {"ok": False, "error": f"неизвестный часовой пояс: {timezone}"}
 
-    backup_and_write(TIMEZONE_FILE, timezone + "\n")
+    # /etc/timezone — необязательный дубль: systemd и timedatectl работают
+    # через /etc/localtime. Писать туда не критично, поэтому ошибку записи
+    # не поднимаем наверх: иначе из-за одного файла оператор не сможет
+    # сменить пояс, хотя сама система сделала бы это успешно.
+    try:
+        backup_and_write(TIMEZONE_FILE, timezone + "\n")
+    except OSError as exc:
+        log.warning("не удалось обновить %s: %s", TIMEZONE_FILE, exc)
 
     code, out, err = run(["timedatectl", "set-timezone", timezone], timeout=20)
     if code != 0:

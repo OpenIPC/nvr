@@ -61,7 +61,9 @@ export interface ApplyNetworkRequest {
 
 export interface TimezoneList {
   total: number
-  regions: string[]
+  // Бэкенд отдаёт и плоский список, и разбивку по регионам. Для выбора
+  // удобнее плоский: группировку по первой части имени делает страница.
+  regions: Record<string, string[]>
   zones: string[]
 }
 
