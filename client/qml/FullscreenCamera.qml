@@ -18,6 +18,29 @@ Window {
     property string clockText: ""
     /** Рамки детекций этой камеры: {x,y,w,h} в долях кадра. */
     property var alarmBoxes: []
+    /** Настройки наложения этой камеры (карточка камеры на сервере). */
+    property var osd: ({
+        enabled: true, show_name: true, show_time: true, show_boxes: true,
+        position: "tl", x: 0.02, y: 0.02, size: "normal"
+    })
+
+    function normalizeOsd(raw) {
+        var d = {
+            enabled: true, show_name: true, show_time: true, show_boxes: true,
+            position: "tl", x: 0.02, y: 0.02, size: "normal"
+        }
+        if (!raw) {
+            return d
+        }
+        var keys = ["enabled", "show_name", "show_time", "show_boxes",
+                    "position", "x", "y", "size"]
+        for (var i = 0; i < keys.length; ++i) {
+            if (raw[keys[i]] !== undefined && raw[keys[i]] !== null) {
+                d[keys[i]] = raw[keys[i]]
+            }
+        }
+        return d
+    }
 
     function pad2(value) {
         return value < 10 ? "0" + value : "" + value
@@ -107,6 +130,10 @@ Window {
         // ячейки оно может прийти пустым (камера без имени — тогда нужен
         // хотя бы адрес устройства).
         cameraName = name.length > 0 ? name : Api.cameraName(id)
+        // Настройки наложения приходят вместе с карточкой камеры: то же,
+        // что видит стена и телефон.
+        var cam = Api.camera(id)
+        osd = normalizeOsd(cam ? cam.osd : null)
         // Адрес потока выдаёт сервер: он знает внешний номер канала камеры
         // и проверяет право на просмотр именно этой камеры.
         Api.prepareStream(id)
@@ -201,7 +228,8 @@ Window {
                 y: mapped.y
                 width: mapped.width
                 height: mapped.height
-                visible: player.active && width > 0 && height > 0
+                visible: player.active && viewer.osd.enabled && viewer.osd.show_boxes
+                         && width > 0 && height > 0
                 color: "transparent"
                 border.width: 2
                 radius: 2
@@ -274,6 +302,7 @@ Window {
 
                 // Время сервера: то же, что на стене и в архиве.
                 Label {
+                    visible: viewer.osd.enabled && viewer.osd.show_time
                     text: viewer.clockText
                     color: "white"
                     font.pixelSize: 14

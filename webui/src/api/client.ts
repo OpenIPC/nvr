@@ -55,6 +55,27 @@ export type CameraVendor =
   | 'xiongmai'
   | 'unknown'
 
+export type CameraOSDPosition = 'tl' | 'tr' | 'bl' | 'br' | 'custom'
+export type CameraOSDSize = 'small' | 'normal' | 'large'
+
+/**
+ * Оформление наложения на видео одной камеры.
+ *
+ * Хранится на сервере в настройках камеры и общее для всех клиентов:
+ * стена, телефон и браузер показывают одно и то же.
+ */
+export interface CameraOSD {
+  enabled: boolean
+  show_name: boolean
+  show_time: boolean
+  show_boxes: boolean
+  position: CameraOSDPosition
+  /** X, Y в долях кадра (0..1) — только для position = custom. */
+  x: number
+  y: number
+  size: CameraOSDSize
+}
+
 export interface Camera {
   id: string
   name: string
@@ -88,6 +109,8 @@ export interface Camera {
   channel_number?: number
   hw_info?: Record<string, any>
   settings?: Record<string, any>
+  /** Наложение на видео: что показывать и где. */
+  osd?: CameraOSD
   created_at: string
   updated_at: string
 }
@@ -1702,6 +1725,8 @@ export const camerasAPI = {
     channel_number?: number;
     // enabled — включить или выключить камеру.
     enabled?: boolean;
+    // osd — оформление наложения на видео этой камеры.
+    osd?: CameraOSD;
   }) => api.patch<Camera>(`/cameras/${id}`, data),
   delete: (id: string) => api.delete(`/cameras/${id}`),
   // Перезапуск стримера камеры (служба Majestic на OpenIPC)

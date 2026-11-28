@@ -387,9 +387,17 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
     }
   }
 
-  // Линия рисуется поверх кадра в процентах — так она остаётся на месте
-  // при любом размере элемента.
-  const hasImage = Boolean(snapshotUrl) && (form.detect_types.includes('line'))
+  // Кадр для разметки линии, зоны номеров и чёрных зон.
+  //
+  // Везде используется СУБпоток: детектор разбирает именно его, и все
+  // координаты (линия, зона, чёрные зоны) заданы в пикселях его кадра.
+  // Раньше линия рисовалась по основному кадру: пропорции у потоков разные
+  // (1920×1080 против 704×576), и линия на живой камере оказывалась не там,
+  // где её нарисовали.
+  const detectFrameUrl = zoneSnapshotUrl || snapshotUrl
+  const hasLineImage = Boolean(detectFrameUrl) && form.detect_types.includes('line')
+  const hasPlateImage = Boolean(detectFrameUrl) && form.detect_types.includes('plate')
+  const hasIgnoreImage = Boolean(detectFrameUrl)
 
   return (
     <div>
@@ -480,12 +488,12 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
             {form.line.length === 2 && t('detectionPanel.lineHintDone')}
           </p>
 
-          {hasImage && (
+          {hasLineImage && (
             <div
               onClick={handleImageClick}
               style={{ position: 'relative', marginBottom: 10, borderRadius: 8, overflow: 'hidden', cursor: 'crosshair', border: '1px solid var(--border)', lineHeight: 0 }}
             >
-              <img ref={lineImgRef} src={snapshotUrl} alt={t('detectionPanel.frameAlt')} style={{ width: '100%', display: 'block', userSelect: 'none' }} draggable={false} />
+              <img ref={lineImgRef} src={detectFrameUrl} alt={t('detectionPanel.frameAlt')} style={{ width: '100%', display: 'block', userSelect: 'none' }} draggable={false} />
               <svg
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
@@ -510,7 +518,7 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
             </div>
           )}
 
-          {!hasImage && (
+          {!hasLineImage && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
               <AlertCircle size={13} />
               {t('detectionPanel.frameUnavailable')}
@@ -562,12 +570,12 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
             {form.plate_zone.length >= 3 && t('detectionPanel.plateHintDone')}
           </p>
 
-          {hasImage && (
+          {hasPlateImage && (
             <div
               onClick={handleZoneClick}
               style={{ position: 'relative', marginBottom: 10, borderRadius: 8, overflow: 'hidden', cursor: 'crosshair', border: '1px solid var(--border)', lineHeight: 0 }}
             >
-              <img ref={zoneImgRef} src={zoneSnapshotUrl || snapshotUrl} alt={t('detectionPanel.frameAlt')} style={{ width: '100%', display: 'block', userSelect: 'none' }} draggable={false} />
+              <img ref={zoneImgRef} src={detectFrameUrl} alt={t('detectionPanel.frameAlt')} style={{ width: '100%', display: 'block', userSelect: 'none' }} draggable={false} />
               <svg
                 viewBox="0 0 100 100"
                 preserveAspectRatio="none"
@@ -696,7 +704,7 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
         {t('detectionPanel.ignoreZonesHint')}
       </p>
 
-      {snapshotUrl && (
+      {hasIgnoreImage && (
         <div
           onClick={handleIgnoreClick}
           style={{
@@ -707,7 +715,7 @@ export default function DetectionSettingsPanel({ cameraId, snapshotUrl, zoneSnap
         >
           <img
             ref={ignoreImgRef}
-            src={snapshotUrl}
+            src={detectFrameUrl}
             alt={t('detectionPanel.frameAlt')}
             style={{ width: '100%', display: 'block', userSelect: 'none' }}
             draggable={false}

@@ -394,12 +394,13 @@ export default function GridPage() {  const toast = useToast()
                     секунды, поправка на транспорт не нужна. */}
                 <DetectionOverlay
                   cameraId={expandedCamera.id}
-                  enabled
+                  enabled={(expandedCamera.osd?.enabled ?? true)
+                    && (expandedCamera.osd?.show_boxes ?? true)}
                   lagSeconds={0}
                 />
                 {/* При развороте имя камеры стоит плашкой сверху, поэтому
                     OSD снизу показывает только время сервера и дату. */}
-                <LiveOsd position="bl" />
+                <LiveOsd position="bl" osd={expandedCamera.osd} showName={false} />
               </LivePlayer>
               <div style={{
                 position: 'absolute', top: 8, left: 8, display: 'flex',
@@ -553,7 +554,7 @@ export default function GridPage() {  const toast = useToast()
                         {/* Время сервера в углу ячейки. Имя камеры уже
                             показано полосой снизу, поэтому здесь только
                             метка времени — иначе она дублировалась бы. */}
-                        <LiveOsd compact />
+                        <LiveOsd compact osd={camera.osd} showName={false} />
                       </LivePlayer>
                     ) : (
                       <div style={{

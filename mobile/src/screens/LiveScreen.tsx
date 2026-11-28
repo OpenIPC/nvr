@@ -161,6 +161,7 @@ export default function LiveScreen({
         client={client}
         cameraId={camera.id}
         cameraName={camera.name}
+        osd={camera.osd}
         sub={kind === 'sub'}
         hlsPath={hlsPath}
         token={token}

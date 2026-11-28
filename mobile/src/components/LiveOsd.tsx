@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import type { ApiClient } from '../net/api';
+import type { CameraOSD } from '../types';
 
 /**
  * OSD поверх живого видео в мобильном приложении: имя камеры, время
@@ -63,6 +64,7 @@ export default function LiveOsd({
   client,
   cameraId,
   cameraName,
+  osd,
   width,
   height,
   active = true,
@@ -70,12 +72,27 @@ export default function LiveOsd({
   client: ApiClient | null;
   cameraId: string;
   cameraName?: string;
+  /** Настройки наложения этой камеры (карточка камеры). */
+  osd?: CameraOSD;
   /** Размер контейнера с видео — по нему считаются координаты рамок. */
   width: number;
   height: number;
   /** Идёт ли видео. Пока картинки нет, рамки рисовать не над чем. */
   active?: boolean;
 }) {
+  // Значения по умолчанию повторяют прежний вид: имя, время и рамки в
+  // левом верхнем углу. Камера без сохранённой настройки выглядит как раньше.
+  const cfg: CameraOSD = {
+    enabled: true,
+    show_name: true,
+    show_time: true,
+    show_boxes: true,
+    position: 'tl',
+    x: 0.02,
+    y: 0.02,
+    size: 'normal',
+    ...osd,
+  };
   const [boxes, setBoxes] = useState<Box[]>([]);
   const [now, setNow] = useState(() => new Date());
   const [skewMs, setSkewMs] = useState(0);
@@ -114,7 +131,7 @@ export default function LiveOsd({
 
   // Рамки: события журнала, свежие не дольше FRESH_SECONDS.
   useEffect(() => {
-    if (!client || !active || !width || !height) {
+    if (!client || !active || !cfg.show_boxes || !width || !height) {
       setBoxes([]);
       return;
     }
@@ -183,14 +200,36 @@ export default function LiveOsd({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, cameraId, width, height, active]);
+  }, [client, cameraId, width, height, active, cfg.show_boxes]);
+
+  if (!cfg.enabled) return null;
+
+  const margin = 6;
+  const osdStyle: ViewStyle = (() => {
+    if (cfg.position === 'custom') {
+      return { position: 'absolute', left: cfg.x * width, top: cfg.y * height };
+    }
+    switch (cfg.position) {
+      case 'tr': return { position: 'absolute', top: margin, right: margin };
+      case 'bl': return { position: 'absolute', bottom: margin, left: margin };
+      case 'br': return { position: 'absolute', bottom: margin, right: margin };
+      default: return { position: 'absolute', top: margin, left: margin };
+    }
+  })();
+  const fontSize = cfg.size === 'small' ? 10 : cfg.size === 'large' ? 15 : 12;
+  const showName = cfg.show_name && Boolean(cameraName);
+  const showTime = cfg.show_time;
 
   return (
     <View pointerEvents="none" style={styles.root}>
-      <View style={styles.osd}>
-        {cameraName ? <Text style={styles.name}>{cameraName}</Text> : null}
-        <Text style={styles.time}>{formatClock(now, skewMs, tzOffsetSec)}</Text>
-      </View>
+      {(showName || showTime) && (
+        <View style={[styles.osd, osdStyle]}>
+          {showName ? <Text style={[styles.name, { fontSize }]}>{cameraName}</Text> : null}
+          {showTime ? (
+            <Text style={[styles.time, { fontSize }]}>{formatClock(now, skewMs, tzOffsetSec)}</Text>
+          ) : null}
+        </View>
+      )}
 
       {boxes.map((box) => (
         <View
@@ -220,9 +259,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
   },
   osd: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
     backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 4,
     paddingHorizontal: 6,

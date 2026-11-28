@@ -43,6 +43,9 @@ func (h *CameraHandler) List(w http.ResponseWriter, r *http.Request) {
 	if cameras == nil {
 		cameras = []domain.Camera{}
 	}
+	for i := range cameras {
+		sanitizeCamera(&cameras[i])
+	}
 	writeJSON(w, http.StatusOK, cameras)
 }
 
@@ -82,6 +85,7 @@ func (h *CameraHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sanitizeCamera(cam)
 	writeJSON(w, http.StatusOK, cam)
 }
 
@@ -110,6 +114,7 @@ func (h *CameraHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	sanitizeCamera(cam)
 	writeJSON(w, http.StatusCreated, cam)
 }
 
@@ -125,13 +130,34 @@ func (h *CameraHandler) Update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
 	}
+	if req.OSD != nil {
+		if err := domain.ValidateCameraOSD(*req.OSD); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "osd: " + err.Error()})
+			return
+		}
+	}
 
 	cam, err := h.svc.Update(r.Context(), id, req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	sanitizeCamera(cam)
 	writeJSON(w, http.StatusOK, cam)
+}
+
+// sanitizeCamera убирает из ответа учётные данные камеры.
+//
+// Поле settings хранит логин и пароль для RTSP, а отдавалось оно клиентам
+// целиком: любой, кто может открыть карточку камеры, получал пароль
+// устройства в JSON. Клиентам эти поля не нужны — адреса потоков выдаёт
+// сервер отдельно.
+func sanitizeCamera(cam *domain.Camera) {
+	if cam == nil || cam.Settings == nil {
+		return
+	}
+	delete(cam.Settings, "username")
+	delete(cam.Settings, "password")
 }
 
 // ProbeStream проверяет RTSP-адрес до сохранения камеры.

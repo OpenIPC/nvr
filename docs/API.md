@@ -101,7 +101,11 @@ GET /api/v1/cameras
     "firmware": "os02g10_i2c_1080p 1920x1080 sub:704x576",
     "status": "online",
     "ptz": false,
-    "settings": {"username": "root", "password": "..."},
+    "osd": {
+      "enabled": true, "show_name": true, "show_time": true,
+      "show_boxes": true, "position": "tl", "x": 0.02, "y": 0.02,
+      "size": "normal"
+    },
     "created_at": "2026-08-26T05:36:16Z",
     "updated_at": "2026-09-16T05:07:20Z"
   }
@@ -109,6 +113,8 @@ GET /api/v1/cameras
 ```
 
 Поле `status` вычисляется автоматически (см. раздел «Мониторинг»).
+Поле `settings` в ответах не показывается: в нём лежат учётные данные
+RTSP, и клиентам они не нужны.
 
 ### Создание
 
@@ -146,6 +152,37 @@ PATCH /api/v1/cameras/{id}
 
 Если меняются потоки или учётные данные, пути в медиасервере
 перерегистрируются автоматически.
+
+### Наложение на видео (OSD)
+
+Настройка на камеру: что и где показывать поверх видео. Применяется всеми
+клиентами (браузер, мобильное приложение, стена), поток не перекодируется.
+
+```json
+{
+  "osd": {
+    "enabled": true,
+    "show_name": true,
+    "show_time": true,
+    "show_boxes": true,
+    "position": "tl",
+    "x": 0.02,
+    "y": 0.02,
+    "size": "normal"
+  }
+}
+```
+
+| Поле | Значения |
+|---|---|
+| `enabled` | общий выключатель наложения |
+| `show_name`, `show_time`, `show_boxes` | что показывать |
+| `position` | `tl`, `tr`, `bl`, `br` — углы; `custom` — по `x`/`y` |
+| `x`, `y` | положение в долях кадра (0..1), только для `custom` |
+| `size` | `small`, `normal`, `large` |
+
+Обновляется тем же `PATCH /api/v1/cameras/{id}`; объект `osd` передаётся
+целиком.
 
 ### Удаление
 

@@ -6,6 +6,7 @@ import { RTCView } from 'react-native-webrtc';
 import type { ApiClient } from '../net/api';
 import { joinUrl } from '../net/address';
 import { openLiveSession, type LiveSession } from '../net/webrtc';
+import type { CameraOSD } from '../types';
 import { colors, radius, spacing } from '../theme';
 import LiveOsd from './LiveOsd';
 
@@ -25,6 +26,7 @@ export default function LivePlayer({
   client,
   cameraId,
   cameraName,
+  osd,
   sub,
   hlsPath,
   token,
@@ -37,6 +39,8 @@ export default function LivePlayer({
   cameraId: string;
   /** Имя камеры для OSD поверх видео. Не передано — показываем только время. */
   cameraName?: string;
+  /** Настройки наложения этой камеры. */
+  osd?: CameraOSD;
   /** Дополнительный поток камеры — экономит трафик в мобильной сети. */
   sub: boolean;
   /** Адрес HLS-плейлиста (в HLS-ветке), относительный. */
@@ -217,6 +221,7 @@ export default function LivePlayer({
           client={client}
           cameraId={cameraId}
           cameraName={cameraName}
+          osd={osd}
           width={layout.width}
           height={layout.height}
           active={!!session || (transport === 'hls' && !!hlsUrl)}

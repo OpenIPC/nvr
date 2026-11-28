@@ -1,10 +1,130 @@
 package domain
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// CameraOSDKey — ключ в cameras.settings, под которым лежит оформление
+// наложения на видео.
+const CameraOSDKey = "osd"
+
+// CameraOSD — что и где показывать поверх живого видео камеры.
+//
+// Настройка на камеру, а не общая: на одной стене операторам нужны имена,
+// на другой — только время; на камере у входа подпись не должна закрывать
+// номер машины, а на обзорной — наоборот. Рисуется клиентами, поток не
+// перекодируется.
+type CameraOSD struct {
+	// Enabled — общий выключатель наложения для этой камеры.
+	Enabled bool `json:"enabled"`
+	ShowName bool `json:"show_name"`
+	ShowTime bool `json:"show_time"`
+	// ShowBoxes — рисовать рамки объектов. Сами события при этом пишутся
+	// как раньше: настройка влияет только на показ.
+	ShowBoxes bool `json:"show_boxes"`
+	// Position — угол экрана: tl, tr, bl, br или custom.
+	Position string `json:"position"`
+	// X, Y — положение в долях кадра (0..1) для Position=custom.
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	// Size — small, normal или large.
+	Size string `json:"size"`
+}
+
+// DefaultCameraOSD — оформление по умолчанию.
+//
+// Совпадает с прежним поведением клиентов: имя, время и рамки видны в
+// левом верхнем углу. Обновление сервера не должно менять вид стены само
+// по себе — иначе на объекте заметят это раньше, чем прочитают журнал.
+func DefaultCameraOSD() CameraOSD {
+	return CameraOSD{
+		Enabled:   true,
+		ShowName:  true,
+		ShowTime:  true,
+		ShowBoxes: true,
+		Position:  "tl",
+		X:         0.02,
+		Y:         0.02,
+		Size:      "normal",
+	}
+}
+
+// NormalizeCameraOSD приводит значения к допустимым.
+//
+// Нужен и при сохранении, и при чтении: в старых записях полей нет вовсе,
+// а пустая строка положения означала бы «неизвестно куда рисовать».
+func NormalizeCameraOSD(in CameraOSD) CameraOSD {
+	switch in.Position {
+	case "tl", "tr", "bl", "br", "custom":
+	default:
+		in.Position = "tl"
+	}
+	switch in.Size {
+	case "small", "normal", "large":
+	default:
+		in.Size = "normal"
+	}
+	in.X = clamp01(in.X)
+	in.Y = clamp01(in.Y)
+	return in
+}
+
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// ValidateCameraOSD проверяет то, что нельзя молча исправить.
+func ValidateCameraOSD(in CameraOSD) error {
+	switch in.Position {
+	case "tl", "tr", "bl", "br", "custom":
+	default:
+		return fmt.Errorf("position must be one of: tl, tr, bl, br, custom")
+	}
+	switch in.Size {
+	case "small", "normal", "large":
+	default:
+		return fmt.Errorf("size must be one of: small, normal, large")
+	}
+	if in.Position == "custom" && (in.X < 0 || in.X > 1 || in.Y < 0 || in.Y > 1) {
+		return fmt.Errorf("x and y must be between 0 and 1")
+	}
+	return nil
+}
+
+// CameraOSDFromSettings достаёт наложение из JSONB-поля settings.
+//
+// Нет ключа или он битый — возвращаются значения по умолчанию: камера не
+// должна остаться без наложения из-за одной испорченной записи.
+func CameraOSDFromSettings(settings map[string]any) CameraOSD {
+	out := DefaultCameraOSD()
+	if settings == nil {
+		return out
+	}
+	raw, ok := settings[CameraOSDKey]
+	if !ok || raw == nil {
+		return out
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return out
+	}
+	// Разбираем ПОВЕРХ значений по умолчанию: если в сохранённой записи
+	// нет, например, show_time, оно останется включённым, а не станет false.
+	if err := json.Unmarshal(b, &out); err != nil {
+		return DefaultCameraOSD()
+	}
+	return NormalizeCameraOSD(out)
+}
 
 // Camera — модель камеры
 type Camera struct {
@@ -41,8 +161,11 @@ type Camera struct {
 	ChannelNumber *int           `json:"channel_number,omitempty"`
 	HWInfo        map[string]any `json:"hw_info,omitempty"`
 	Settings      map[string]any `json:"settings,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	// OSD — наложение на видео этой камеры: что показывать и где.
+	// Отдаётся клиентам готовым, чтобы каждому не разбирать settings.
+	OSD       CameraOSD `json:"osd"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Site — объект размещения камер
@@ -1061,6 +1184,9 @@ type UpdateCameraRequest struct {
 	Enabled *bool `json:"enabled,omitempty"`
 	// ChannelNumber — номер канала для внешнего RTSP-доступа.
 	ChannelNumber *int `json:"channel_number,omitempty"`
+	// OSD — оформление наложения на видео. Указатель: nil означает
+	// «не менять», иначе сохранение карточки сбрасывало бы настройку.
+	OSD *CameraOSD `json:"osd,omitempty"`
 }
 
 // ScanRequest — запрос на сканирование подсети для поиска камер

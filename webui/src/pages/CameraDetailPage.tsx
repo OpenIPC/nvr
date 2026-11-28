@@ -11,6 +11,7 @@ import LiveOsd from '../components/LiveOsd'
 import EditCameraModal from '../components/EditCameraModal'
 import PTZPanel from '../components/PTZPanel'
 import DetectionSettingsPanel from '../components/DetectionSettingsPanel'
+import CameraOsdPanel from '../components/CameraOsdPanel'
 import CameraNativeEventsPanel from '../components/CameraNativeEventsPanel'
 import RecordingSettingsPanel from '../components/RecordingSettingsPanel'
 import DetectionOverlay from '../components/DetectionOverlay'
@@ -472,12 +473,14 @@ export default function CameraDetailPage() {  const { id } = useParams<{ id: str
                     секунды, поэтому поправка на транспорт не нужна. */}
                 <DetectionOverlay
                   cameraId={camera.id}
-                  enabled={isOnline}
+                  enabled={isOnline
+                    && (camera.osd?.enabled ?? true)
+                    && (camera.osd?.show_boxes ?? true)}
                   lagSeconds={0}
                 />
                 {/* Своё OSD: имя камеры и время сервера. Рисуется в
                     браузере, поток не перекодируется. */}
-                <LiveOsd name={camera.name} />
+                <LiveOsd name={camera.name} osd={camera.osd} />
               </LivePlayer>
             ) : (
               <div className="video-placeholder" style={{ position: 'relative' }}>
@@ -670,6 +673,9 @@ export default function CameraDetailPage() {  const { id } = useParams<{ id: str
             {tab === 'detection' && (
               <div>
                 <DetectionSettingsPanel cameraId={camera.id} snapshotUrl={snapshotUrl} zoneSnapshotUrl={zoneSnapshotUrl} />
+                {/* Наложение на видео: что показывать и где. Настройка на
+                    камеру — стена, телефон и браузер показывают одно и то же. */}
+                <CameraOsdPanel camera={camera} onSaved={refetch} />
                 {/* События самой камеры: отдельный источник, а не часть
                     настроек нашей детекции. У камеры Detector и NVR
                     ищут одно и то же независимо друг от друга. */}

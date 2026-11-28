@@ -462,6 +462,9 @@ func (s *CameraService) Create(ctx context.Context, req domain.CreateCameraReque
 		// Новая камера всегда включена: заводят её именно для того, чтобы
 		// смотреть. Выключение — отдельное действие в карточке.
 		Enabled:   true,
+		// Наложение по умолчанию: имя, время и рамки в левом верхнем углу.
+		// Настраивается потом в карточке камеры.
+		OSD:       domain.DefaultCameraOSD(),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -818,6 +821,18 @@ func (s *CameraService) Update(ctx context.Context, id uuid.UUID, req domain.Upd
 		}
 		cam.Settings["ptz"] = *req.PTZ
 		cam.PTZ = *req.PTZ
+	}
+
+	// Оформление наложения на видео. Отдельный ключ в settings: настройка
+	// не влияет на потоки и учётные данные, поэтому полную перезапись
+	// карточки ради неё делать не нужно.
+	if req.OSD != nil {
+		osd := domain.NormalizeCameraOSD(*req.OSD)
+		if cam.Settings == nil {
+			cam.Settings = make(map[string]any)
+		}
+		cam.Settings[domain.CameraOSDKey] = osd
+		cam.OSD = osd
 	}
 
 	// Включение и выключение камеры. Сравниваем со текущим значением,

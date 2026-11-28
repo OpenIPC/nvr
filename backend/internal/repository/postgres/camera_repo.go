@@ -61,12 +61,15 @@ func (r *CameraRepo) List(ctx context.Context) ([]domain.Camera, error) {
 // Отдельные колонки под них не заводим: набор настроек будет расширяться,
 // а схему БД менять при каждом новом флаге неудобно.
 func applySettings(c *domain.Camera) {
-	if c.Settings == nil {
-		return
+	if c.Settings != nil {
+		if v, ok := c.Settings["ptz"].(bool); ok {
+			c.PTZ = v
+		}
 	}
-	if v, ok := c.Settings["ptz"].(bool); ok {
-		c.PTZ = v
-	}
+	// OSD есть у каждой камеры: если ключа в settings ещё нет, возвращаются
+	// значения по умолчанию — клиентам не нужно знать, сохраняли настройку
+	// когда-нибудь или нет.
+	c.OSD = domain.CameraOSDFromSettings(c.Settings)
 }
 
 func (r *CameraRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Camera, error) {

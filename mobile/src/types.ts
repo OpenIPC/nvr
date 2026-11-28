@@ -34,6 +34,18 @@ export interface LoginResult {
   };
 }
 
+/** Оформление наложения на видео одной камеры (общее для всех клиентов). */
+export interface CameraOSD {
+  enabled: boolean;
+  show_name: boolean;
+  show_time: boolean;
+  show_boxes: boolean;
+  position: 'tl' | 'tr' | 'bl' | 'br' | 'custom';
+  x: number;
+  y: number;
+  size: 'small' | 'normal' | 'large';
+}
+
 /** Камера в списке. */
 export interface Camera {
   id: string;
@@ -50,6 +62,8 @@ export interface Camera {
   channel_number?: number;
   hw_info?: Record<string, unknown>;
   settings?: Record<string, unknown>;
+  /** Наложение на видео: что показывать и где. */
+  osd?: CameraOSD;
   created_at?: string;
   updated_at?: string;
 }

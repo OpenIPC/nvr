@@ -27,6 +27,16 @@ Rectangle {
     /** Время сервера одной строкой; обновляется раз в секунду. */
     property string clockText: ""
     /**
+     * Настройки наложения этой камеры (карточка камеры на сервере).
+     *
+     * Значения по умолчанию повторяют прежний вид: имя, время и рамки в
+     * левом верхнем углу. Настройка приходит вместе со списком камер.
+     */
+    property var osd: ({
+        enabled: true, show_name: true, show_time: true, show_boxes: true,
+        position: "tl", x: 0.02, y: 0.02, size: "normal"
+    })
+    /**
      * Рамки детекций из потока событий.
      *
      * Массив {x,y,w,h} в долях кадра и время истечения. Рамка живёт
@@ -74,9 +84,36 @@ Rectangle {
         cell.updateTitle()
     }
 
-    /** Имя камеры: список приходит с сервера и может обновиться позже. */
+    /** Имя камеры и настройки наложения: список приходит с сервера. */
     function updateTitle() {
+        var cam = cell.cameraId.length > 0 ? Api.camera(cell.cameraId) : null
         cell.cameraTitle = cell.cameraId.length > 0 ? Api.cameraName(cell.cameraId) : ""
+        cell.osd = cell.normalizeOsd(cam ? cam.osd : null)
+    }
+
+    /**
+     * Приводит настройки OSD к полному набору.
+     *
+     * Сервер может не прислать поле (старая запись) или прислать не все —
+     * подставляем значения по умолчанию, чтобы ячейка не осталась без
+     * наложения и не падала на undefined.
+     */
+    function normalizeOsd(raw) {
+        var d = {
+            enabled: true, show_name: true, show_time: true, show_boxes: true,
+            position: "tl", x: 0.02, y: 0.02, size: "normal"
+        }
+        if (!raw) {
+            return d
+        }
+        var keys = ["enabled", "show_name", "show_time", "show_boxes",
+                    "position", "x", "y", "size"]
+        for (var i = 0; i < keys.length; ++i) {
+            if (raw[keys[i]] !== undefined && raw[keys[i]] !== null) {
+                d[keys[i]] = raw[keys[i]]
+            }
+        }
+        return d
     }
 
     function pad2(value) {
@@ -222,7 +259,8 @@ Rectangle {
             y: mapped.y
             width: mapped.width
             height: mapped.height
-            visible: player.active && width > 0 && height > 0
+            visible: player.active && cell.osd.enabled && cell.osd.show_boxes
+                     && width > 0 && height > 0
             color: "transparent"
             border.width: 2
             radius: 2
@@ -336,10 +374,20 @@ Rectangle {
     // потоков ради надписи положило бы машину, а рамки и текст на клиенте
     // остаются чёткими при любом разрешении.
     Rectangle {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.margins: 4
-        visible: cell.cameraId.length > 0
+        id: osdBox
+        readonly property real margin: 4
+        readonly property bool custom: cell.osd.position === "custom"
+        readonly property int fontSize: cell.osd.size === "small" ? 10
+                                        : (cell.osd.size === "large" ? 16 : 11)
+
+        x: custom ? parent.width * cell.osd.x
+                  : ((cell.osd.position === "tr" || cell.osd.position === "br")
+                     ? parent.width - width - margin : margin)
+        y: custom ? parent.height * cell.osd.y
+                  : ((cell.osd.position === "bl" || cell.osd.position === "br")
+                     ? parent.height - height - margin : margin)
+        visible: cell.cameraId.length > 0 && cell.osd.enabled
+                 && (cell.osd.show_name || cell.osd.show_time)
         color: "rgba(0,0,0,0.45)"
         radius: 3
         implicitWidth: osdColumn.implicitWidth + 10
@@ -351,15 +399,17 @@ Rectangle {
             spacing: 0
 
             Label {
+                visible: cell.osd.show_name
                 text: cell.cameraTitle
                 color: "#fff"
-                font.pixelSize: 11
+                font.pixelSize: osdBox.fontSize
                 font.bold: true
             }
             Label {
+                visible: cell.osd.show_time
                 text: cell.clockText
                 color: "#fff"
-                font.pixelSize: 11
+                font.pixelSize: osdBox.fontSize
                 font.family: "monospace"
             }
         }
